@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# agent-setup — drop the shared Claude Code skills / commands / MCP config into
+# the current project (or a target dir). ClickUp-specific pieces are intentionally
+# not part of the bundle.
+#
+# Usage:
+#   agent-setup [TARGET_DIR]      # default: current directory
+#   agent-setup --list            # show what the bundle contains
+#   agent-setup --force [TARGET]  # overwrite skills/commands that already exist
+#   agent-setup --help
+#
+# Merge behaviour:
+#   .claude/skills/*         copied per-skill; existing dirs skipped unless --force
+#   .claude/commands/*       copied per-tree;  existing files skipped unless --force
+#   .claude/settings.local.json   permissions.allow + enabledMcpjsonServers merged (deduped)
+#   .mcp.json               mcpServers merged (existing keys kept unless --force)
+
+set -euo pipefail
+
+FORCE=0
+LIST=0
+TARGET=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=1 ;;
+    --list)  LIST=1 ;;
+    -h|--help)
+      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    -*) echo "agent-setup: unknown flag: $arg" >&2; exit 2 ;;
+    *)  TARGET="$arg" ;;
+  esac
+done
+
+# Resolve the real location of this script (follow symlinks), bundle sits ../bundle
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+BUNDLE="$(cd "$BIN_DIR/.." && pwd)/bundle"
+
+[ -d "$BUNDLE/.claude" ] || { echo "agent-setup: bundle not found at $BUNDLE" >&2; exit 1; }
+command -v jq >/dev/null || { echo "agent-setup: jq is required (brew install jq)" >&2; exit 1; }
+
+if [ "$LIST" -eq 1 ]; then
+  echo "bundle: $BUNDLE"
+  echo
+  echo "skills:";   ls -1 "$BUNDLE/.claude/skills" | sed 's/^/  /'
+  echo "commands:"; ( cd "$BUNDLE/.claude" && find commands -type f | sed 's/^/  /' )
+  echo "configs:"
+  echo "  .claude/settings.local.json (permissions.allow, enabledMcpjsonServers)"
+  echo "  .mcp.json (mcpServers)"
+  exit 0
+fi
+
+TARGET="$(cd "${TARGET:-$PWD}" && pwd)"
+echo "agent-setup -> $TARGET"
+mkdir -p "$TARGET/.claude"
+
+copied=0 skipped=0
+
+# --- skills -----------------------------------------------------------------
+mkdir -p "$TARGET/.claude/skills"
+for src in "$BUNDLE"/.claude/skills/*/; do
+  name="$(basename "$src")"
+  dst="$TARGET/.claude/skills/$name"
+  if [ -e "$dst" ] && [ "$FORCE" -eq 0 ]; then
+    echo "  skill  $name  (exists, skip)"; skipped=$((skipped+1)); continue
+  fi
+  rm -rf "$dst"; cp -R "$src" "$dst"
+  echo "  skill  $name  (installed)"; copied=$((copied+1))
+done
+
+# --- commands -------------------------------------------------------------------
+while IFS= read -r rel; do
+  src="$BUNDLE/.claude/$rel"
+  dst="$TARGET/.claude/$rel"
+  mkdir -p "$(dirname "$dst")"
+  if [ -e "$dst" ] && [ "$FORCE" -eq 0 ]; then
+    echo "  cmd    $rel  (exists, skip)"; skipped=$((skipped+1)); continue
+  fi
+  cp "$src" "$dst"
+  echo "  cmd    $rel  (installed)"; copied=$((copied+1))
+done < <( cd "$BUNDLE/.claude" && find commands -type f )
+
+# --- .claude/settings.local.json ---------------------------------------------
+BSET="$BUNDLE/.claude/settings.local.json"
+TSET="$TARGET/.claude/settings.local.json"
+if [ -f "$BSET" ]; then
+  if [ -f "$TSET" ]; then
+    tmp="$(mktemp)"
+    jq -s '
+      .[0] as $cur | .[1] as $add |
+      $cur
+      | .permissions.allow = (((($cur.permissions.allow) // []) + (($add.permissions.allow) // [])) | unique)
+      | .enabledMcpjsonServers = (((($cur.enabledMcpjsonServers) // []) + (($add.enabledMcpjsonServers) // [])) | unique)
+    ' "$TSET" "$BSET" > "$tmp" && mv "$tmp" "$TSET"
+    echo "  cfg    .claude/settings.local.json  (merged)"
+  else
+    cp "$BSET" "$TSET"
+    echo "  cfg    .claude/settings.local.json  (installed)"
+  fi
+  copied=$((copied+1))
+fi
+
+# --- .mcp.json ---------------------------------------------------------------
+BMCP="$BUNDLE/.mcp.json"
+TMCP="$TARGET/.mcp.json"
+if [ -f "$BMCP" ]; then
+  if [ -f "$TMCP" ]; then
+    tmp="$(mktemp)"
+    if [ "$FORCE" -eq 1 ]; then
+      # bundle wins on key clash
+      jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($c.mcpServers // {}) + ($a.mcpServers // {}))' "$TMCP" "$BMCP" > "$tmp"
+    else
+      # keep existing server keys, add only the missing ones
+      jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($a.mcpServers // {}) + ($c.mcpServers // {}))' "$TMCP" "$BMCP" > "$tmp"
+    fi
+    mv "$tmp" "$TMCP"
+    echo "  cfg    .mcp.json  (merged)"
+  else
+    cp "$BMCP" "$TMCP"
+    echo "  cfg    .mcp.json  (installed)"
+  fi
+  copied=$((copied+1))
+fi
+
+echo
+echo "done: $copied written, $skipped skipped.  Re-run with --force to overwrite skipped items."
