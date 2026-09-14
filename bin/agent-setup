@@ -1,39 +1,27 @@
 #!/usr/bin/env bash
-# agent-setup — drop the shared Claude Code skills / commands / MCP config into
-# the current project (or a target dir). ClickUp-specific pieces are intentionally
-# not part of the bundle.
+# agent-setup — hub to bootstrap a Claude Code dev setup: shared skills/commands,
+# MCP servers, optional third-party plugins (rtk, ponytail, caveman, superpowers,
+# anthropic official skills) and the local observability stack. Everything is
+# opt-in, asked one item at a time, and each item can go global (~/.claude, all
+# projects) or project (this repo only).
 #
 # Usage:
-#   agent-setup [TARGET_DIR]      # default: current directory
-#   agent-setup --list            # show what the bundle contains
-#   agent-setup --force [TARGET]  # overwrite skills/commands that already exist
+#   agent-setup                     # interactive wizard (default)
+#   agent-setup wizard              # same, explicit
+#   agent-setup install [TARGET]    # non-interactive: drop the bundle into TARGET
+#   agent-setup install --force [TARGET]
+#   agent-setup --list              # show what the bundle contains
 #   agent-setup --help
 #
-# Merge behaviour:
+# Bundle merge behaviour (used by both the wizard's "skills" step and `install`):
 #   .claude/skills/*         copied per-skill; existing dirs skipped unless --force
 #   .claude/commands/*       copied per-tree;  existing files skipped unless --force
 #   .claude/settings.local.json   permissions.allow + enabledMcpjsonServers merged (deduped)
-#   .mcp.json               mcpServers merged (existing keys kept unless --force)
+#   .mcp.json               mcpServers merged (existing keys kept unless --force) — project scope only
 
 set -euo pipefail
 
-FORCE=0
-LIST=0
-TARGET=""
-
-for arg in "$@"; do
-  case "$arg" in
-    --force) FORCE=1 ;;
-    --list)  LIST=1 ;;
-    -h|--help)
-      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0 ;;
-    -*) echo "agent-setup: unknown flag: $arg" >&2; exit 2 ;;
-    *)  TARGET="$arg" ;;
-  esac
-done
-
-# Resolve the real location of this script (follow symlinks), bundle sits ../bundle
+# --- resolve bundle location -------------------------------------------------
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
   DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
@@ -41,12 +29,98 @@ while [ -h "$SOURCE" ]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-BUNDLE="$(cd "$BIN_DIR/.." && pwd)/bundle"
+REPO_ROOT="$(cd "$BIN_DIR/.." && pwd)"
+BUNDLE="$REPO_ROOT/bundle"
 
-[ -d "$BUNDLE/.claude" ] || { echo "agent-setup: bundle not found at $BUNDLE" >&2; exit 1; }
-command -v jq >/dev/null || { echo "agent-setup: jq is required (brew install jq)" >&2; exit 1; }
+usage() {
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+}
 
-if [ "$LIST" -eq 1 ]; then
+require_jq() {
+  command -v jq >/dev/null || { echo "agent-setup: jq is required (brew install jq)" >&2; exit 1; }
+}
+
+# --- bundle: skills/commands/settings/mcp ------------------------------------
+# install_bundle TARGET FORCE(0|1) INCLUDE_MCP(0|1)
+install_bundle() {
+  local target="$1" force="$2" include_mcp="$3"
+  [ -d "$BUNDLE/.claude" ] || { echo "agent-setup: bundle not found at $BUNDLE" >&2; exit 1; }
+  require_jq
+
+  target="$(mkdir -p "$target" && cd "$target" && pwd)"
+  echo "agent-setup -> $target"
+  mkdir -p "$target/.claude"
+
+  local copied=0 skipped=0
+
+  mkdir -p "$target/.claude/skills"
+  for src in "$BUNDLE"/.claude/skills/*/; do
+    local name; name="$(basename "$src")"
+    local dst="$target/.claude/skills/$name"
+    if [ -e "$dst" ] && [ "$force" -eq 0 ]; then
+      echo "  skill  $name  (exists, skip)"; skipped=$((skipped+1)); continue
+    fi
+    rm -rf "$dst"; cp -R "$src" "$dst"
+    echo "  skill  $name  (installed)"; copied=$((copied+1))
+  done
+
+  while IFS= read -r rel; do
+    local src="$BUNDLE/.claude/$rel"
+    local dst="$target/.claude/$rel"
+    mkdir -p "$(dirname "$dst")"
+    if [ -e "$dst" ] && [ "$force" -eq 0 ]; then
+      echo "  cmd    $rel  (exists, skip)"; skipped=$((skipped+1)); continue
+    fi
+    cp "$src" "$dst"
+    echo "  cmd    $rel  (installed)"; copied=$((copied+1))
+  done < <( cd "$BUNDLE/.claude" && find commands -type f )
+
+  local bset="$BUNDLE/.claude/settings.local.json"
+  local tset="$target/.claude/settings.local.json"
+  if [ -f "$bset" ]; then
+    if [ -f "$tset" ]; then
+      local tmp; tmp="$(mktemp)"
+      jq -s '
+        .[0] as $cur | .[1] as $add |
+        $cur
+        | .permissions.allow = (((($cur.permissions.allow) // []) + (($add.permissions.allow) // [])) | unique)
+        | .enabledMcpjsonServers = (((($cur.enabledMcpjsonServers) // []) + (($add.enabledMcpjsonServers) // [])) | unique)
+      ' "$tset" "$bset" > "$tmp" && mv "$tmp" "$tset"
+      echo "  cfg    .claude/settings.local.json  (merged)"
+    else
+      cp "$bset" "$tset"
+      echo "  cfg    .claude/settings.local.json  (installed)"
+    fi
+    copied=$((copied+1))
+  fi
+
+  if [ "$include_mcp" -eq 1 ]; then
+    local bmcp="$BUNDLE/.mcp.json"
+    local tmcp="$target/.mcp.json"
+    if [ -f "$bmcp" ]; then
+      if [ -f "$tmcp" ]; then
+        local tmp; tmp="$(mktemp)"
+        if [ "$force" -eq 1 ]; then
+          jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($c.mcpServers // {}) + ($a.mcpServers // {}))' "$tmcp" "$bmcp" > "$tmp"
+        else
+          jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($a.mcpServers // {}) + ($c.mcpServers // {}))' "$tmcp" "$bmcp" > "$tmp"
+        fi
+        mv "$tmp" "$tmcp"
+        echo "  cfg    .mcp.json  (merged)"
+      else
+        cp "$bmcp" "$tmcp"
+        echo "  cfg    .mcp.json  (installed)"
+      fi
+      copied=$((copied+1))
+    fi
+  fi
+
+  echo
+  echo "done: $copied written, $skipped skipped.  Re-run with --force to overwrite skipped items."
+}
+
+cmd_list() {
+  [ -d "$BUNDLE/.claude" ] || { echo "agent-setup: bundle not found at $BUNDLE" >&2; exit 1; }
   echo "bundle: $BUNDLE"
   echo
   echo "skills:";   ls -1 "$BUNDLE/.claude/skills" | sed 's/^/  /'
@@ -54,80 +128,186 @@ if [ "$LIST" -eq 1 ]; then
   echo "configs:"
   echo "  .claude/settings.local.json (permissions.allow, enabledMcpjsonServers)"
   echo "  .mcp.json (mcpServers)"
-  exit 0
-fi
+  echo
+  echo "wizard also offers: MCP servers (context7, github, playwright,"
+  echo "sequential-thinking), rtk, ponytail, caveman, superpowers, anthropic"
+  echo "official skills (example-skills, document-skills), and the observability stack."
+}
 
-TARGET="$(cd "${TARGET:-$PWD}" && pwd)"
-echo "agent-setup -> $TARGET"
-mkdir -p "$TARGET/.claude"
+cmd_install() {
+  local force=0 target=""
+  for arg in "$@"; do
+    case "$arg" in
+      --force) force=1 ;;
+      -*) echo "agent-setup install: unknown flag: $arg" >&2; exit 2 ;;
+      *)  target="$arg" ;;
+    esac
+  done
+  install_bundle "${target:-$PWD}" "$force" 1
+}
 
-copied=0 skipped=0
+# --- wizard helpers -----------------------------------------------------------
+# ask_yn "prompt" default(Y|N) -> 0 (yes) / 1 (no)
+ask_yn() {
+  local prompt="$1" default="${2:-N}" hint ans
+  hint="y/N"; [ "$default" = "Y" ] && hint="Y/n"
+  read -r -p "$prompt [$hint] " ans || ans=""
+  ans="${ans:-$default}"
+  [[ "$ans" =~ ^[Yy] ]]
+}
 
-# --- skills -----------------------------------------------------------------
-mkdir -p "$TARGET/.claude/skills"
-for src in "$BUNDLE"/.claude/skills/*/; do
-  name="$(basename "$src")"
-  dst="$TARGET/.claude/skills/$name"
-  if [ -e "$dst" ] && [ "$FORCE" -eq 0 ]; then
-    echo "  skill  $name  (exists, skip)"; skipped=$((skipped+1)); continue
+# ask_scope "label" -> echoes "global" or "projeto"
+ask_scope() {
+  local label="$1" ans
+  read -r -p "    -> $label: instalar (g)lobal [todos os projetos] ou (p)rojeto [$PWD]? [p] " ans >&2 || ans=""
+  ans="${ans:-p}"
+  if [[ "$ans" =~ ^[Gg] ]]; then echo global; else echo projeto; fi
+}
+
+section() { echo; echo "── $1 ──────────────────────────────────────"; }
+
+wizard_bundle() {
+  section "Skills & commands (OpenSpec, commit-split)"
+  if ask_yn "Instalar o bundle de skills/commands compartilhados?" Y; then
+    local scope; scope="$(ask_scope "skills/commands")"
+    local target=$PWD
+    [ "$scope" = "global" ] && target="$HOME"
+    install_bundle "$target" 0 0
   fi
-  rm -rf "$dst"; cp -R "$src" "$dst"
-  echo "  skill  $name  (installed)"; copied=$((copied+1))
-done
+}
 
-# --- commands -------------------------------------------------------------------
-while IFS= read -r rel; do
-  src="$BUNDLE/.claude/$rel"
-  dst="$TARGET/.claude/$rel"
-  mkdir -p "$(dirname "$dst")"
-  if [ -e "$dst" ] && [ "$FORCE" -eq 0 ]; then
-    echo "  cmd    $rel  (exists, skip)"; skipped=$((skipped+1)); continue
+wizard_mcp() {
+  section "Servidores MCP"
+  echo "  Escolha quais habilitar. Cada um pode ir global (todos os projetos, escopo 'user')"
+  echo "  ou só neste projeto (escopo 'project', gera/edita .mcp.json)."
+
+  local name cmd scope claude_scope
+
+  if ask_yn "  context7 (docs de libs sempre atualizadas)?" Y; then
+    scope="$(ask_scope "context7")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
+    claude mcp add context7 --scope "$claude_scope" -- npx -y @upstash/context7-mcp || true
   fi
-  cp "$src" "$dst"
-  echo "  cmd    $rel  (installed)"; copied=$((copied+1))
-done < <( cd "$BUNDLE/.claude" && find commands -type f )
 
-# --- .claude/settings.local.json ---------------------------------------------
-BSET="$BUNDLE/.claude/settings.local.json"
-TSET="$TARGET/.claude/settings.local.json"
-if [ -f "$BSET" ]; then
-  if [ -f "$TSET" ]; then
-    tmp="$(mktemp)"
-    jq -s '
-      .[0] as $cur | .[1] as $add |
-      $cur
-      | .permissions.allow = (((($cur.permissions.allow) // []) + (($add.permissions.allow) // [])) | unique)
-      | .enabledMcpjsonServers = (((($cur.enabledMcpjsonServers) // []) + (($add.enabledMcpjsonServers) // [])) | unique)
-    ' "$TSET" "$BSET" > "$tmp" && mv "$tmp" "$TSET"
-    echo "  cfg    .claude/settings.local.json  (merged)"
-  else
-    cp "$BSET" "$TSET"
-    echo "  cfg    .claude/settings.local.json  (installed)"
+  if ask_yn "  GitHub (PRs, issues, code search via API oficial)?" Y; then
+    scope="$(ask_scope "github")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
+    claude mcp add --transport http github https://api.githubcopilot.com/mcp/ --scope "$claude_scope" || true
+    echo "    (na primeira vez: rode 'claude mcp login github' pra autenticar)"
   fi
-  copied=$((copied+1))
-fi
 
-# --- .mcp.json ---------------------------------------------------------------
-BMCP="$BUNDLE/.mcp.json"
-TMCP="$TARGET/.mcp.json"
-if [ -f "$BMCP" ]; then
-  if [ -f "$TMCP" ]; then
-    tmp="$(mktemp)"
-    if [ "$FORCE" -eq 1 ]; then
-      # bundle wins on key clash
-      jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($c.mcpServers // {}) + ($a.mcpServers // {}))' "$TMCP" "$BMCP" > "$tmp"
+  if ask_yn "  Playwright (automação/inspeção de browser)?" Y; then
+    scope="$(ask_scope "playwright")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
+    claude mcp add playwright --scope "$claude_scope" -- npx -y @playwright/mcp@latest || true
+  fi
+
+  if ask_yn "  Sequential Thinking (força raciocínio passo-a-passo em tarefas complexas)?" N; then
+    scope="$(ask_scope "sequential-thinking")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
+    claude mcp add sequential-thinking --scope "$claude_scope" -- npx -y @modelcontextprotocol/server-sequential-thinking || true
+  fi
+}
+
+wizard_rtk() {
+  section "rtk (Rust Token Killer — comprime output de bash em até 90%)"
+  if ask_yn "  Instalar rtk?" N; then
+    if ! command -v rtk >/dev/null; then
+      curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+      echo '  (adicione ~/.local/bin ao PATH se ainda não estiver)'
     else
-      # keep existing server keys, add only the missing ones
-      jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($a.mcpServers // {}) + ($c.mcpServers // {}))' "$TMCP" "$BMCP" > "$tmp"
+      echo "  rtk já instalado ($(command -v rtk))"
     fi
-    mv "$tmp" "$TMCP"
-    echo "  cfg    .mcp.json  (merged)"
-  else
-    cp "$BMCP" "$TMCP"
-    echo "  cfg    .mcp.json  (installed)"
+    local scope; scope="$(ask_scope "hook do rtk")"
+    if [ "$scope" = "global" ]; then
+      rtk init -g
+    else
+      ( cd "$PWD" && rtk init )
+    fi
   fi
-  copied=$((copied+1))
-fi
+}
 
-echo
-echo "done: $copied written, $skipped skipped.  Re-run with --force to overwrite skipped items."
+wizard_plugin() {
+  # wizard_plugin "label" "marketplace-repo (empty = already-registered marketplace)" "plugin@marketplace"
+  local label="$1" repo="$2" plugin="$3" scope claude_scope
+  section "$label"
+  if ask_yn "  Instalar $label?" N; then
+    [ -n "$repo" ] && { claude plugin marketplace add "$repo" || true; }
+    scope="$(ask_scope "$label")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
+    claude plugin install "$plugin" --scope "$claude_scope" -y || true
+  fi
+}
+
+wizard_observability() {
+  section "Observability (OTel Collector + Prometheus + Loki + Grafana, local)"
+  if ask_yn "  Subir a stack e ligar o telemetry do Claude Code neste shell?" N; then
+    ( cd "$REPO_ROOT/observability" && docker compose up -d )
+    echo "  Grafana: http://localhost:47300  (dashboard 'Claude Code — Uso & Custo')"
+
+    local marker="# agents-setup: claude telemetry"
+    local shell_name; shell_name="$(basename "${SHELL:-bash}")"
+    local rc="$HOME/.bashrc"
+    [ "$shell_name" = "zsh" ] && rc="$HOME/.zshrc"
+    if [ "$shell_name" = "fish" ]; then
+      local fish_cfg="$HOME/.config/fish/config.fish"
+      if ! grep -qF "$marker" "$fish_cfg" 2>/dev/null; then
+        { echo "$marker"; cat "$REPO_ROOT/observability/claude-telemetry.fish"; } >> "$fish_cfg"
+        echo "  telemetry env vars adicionadas a $fish_cfg"
+      else
+        echo "  telemetry env vars já presentes em $fish_cfg"
+      fi
+    else
+      if ! grep -qF "$marker" "$rc" 2>/dev/null; then
+        {
+          echo "$marker"
+          echo "export CLAUDE_CODE_ENABLE_TELEMETRY=1"
+          echo "export OTEL_METRICS_EXPORTER=otlp"
+          echo "export OTEL_LOGS_EXPORTER=otlp"
+          echo "export OTEL_EXPORTER_OTLP_PROTOCOL=grpc"
+          echo "export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:47317"
+          echo "export OTEL_METRIC_EXPORT_INTERVAL=10000"
+          echo "export OTEL_LOGS_EXPORT_INTERVAL=5000"
+        } >> "$rc"
+        echo "  telemetry env vars adicionadas a $rc (abra um terminal novo, ou 'source $rc')"
+      else
+        echo "  telemetry env vars já presentes em $rc"
+      fi
+    fi
+  fi
+}
+
+cmd_wizard() {
+  echo "agent-setup wizard — monte seu ambiente Claude Code"
+  echo "Cada item é opcional; pra cada um escolhido você decide global ou por-projeto."
+  echo
+
+  wizard_bundle
+  wizard_mcp
+  wizard_rtk
+  wizard_plugin "ponytail (evita over-engineering, prefere stdlib/soluções nativas)" \
+    "DietrichGebert/ponytail" "ponytail@ponytail"
+  wizard_plugin "caveman (respostas ultra-comprimidas, corta ~65% dos tokens de output)" \
+    "JuliusBrussee/caveman" "caveman@caveman"
+  wizard_plugin "Superpowers (metodologia: TDD, systematic-debugging, git-worktrees, brainstorming, code review)" \
+    "" "superpowers@claude-plugins-official"
+  wizard_plugin "Anthropic official — example-skills (skill-creator, mcp-builder, webapp-testing, frontend-design)" \
+    "anthropics/skills" "example-skills@anthropic-agent-skills"
+  wizard_plugin "Anthropic official — document-skills (docx, pdf, pptx, xlsx)" \
+    "anthropics/skills" "document-skills@anthropic-agent-skills"
+  wizard_observability
+
+  echo
+  echo "wizard concluído."
+}
+
+# --- entrypoint ---------------------------------------------------------------
+case "${1:-}" in
+  --list) cmd_list; exit 0 ;;
+  -h|--help) usage; exit 0 ;;
+  install) shift; cmd_install "$@"; exit 0 ;;
+  wizard) cmd_wizard; exit 0 ;;
+  --force)
+    # back-compat: `agent-setup --force [TARGET]` == old non-interactive default
+    shift; cmd_install --force "$@"; exit 0 ;;
+  "") cmd_wizard; exit 0 ;;
+  -*) echo "agent-setup: unknown flag: $1" >&2; exit 2 ;;
+  *)
+    # back-compat: `agent-setup TARGET` == old non-interactive default
+    cmd_install "$@"; exit 0 ;;
+esac

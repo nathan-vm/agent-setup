@@ -12,6 +12,20 @@ services:
       - "47318:4318"   # OTLP HTTP  (uncommon host port)
     restart: unless-stopped
 
+  # Log/event store. Prometheus only sees redacted metric labels
+  # (user-configured MCP servers show up as "custom" there by design -
+  # see observability/README.md). The `tool_result` log event carries the
+  # real, unredacted tool_name (e.g. mcp__playwright__browser_navigate),
+  # so local MCP attribution goes through Loki instead of Prometheus.
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports:
+      - "47100:3100"
+    volumes:
+      - loki-data:/loki
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     command:
@@ -43,8 +57,10 @@ services:
       - "47300:3000"
     depends_on:
       - prometheus
+      - loki
     restart: unless-stopped
 
 volumes:
   prometheus-data:
   grafana-data:
+  loki-data:

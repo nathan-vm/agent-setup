@@ -19,6 +19,12 @@ exporters:
   debug:
     verbosity: basic
 
+  # Claude Code tool_result/tool_decision events -> Loki, native OTLP ingestion.
+  # This is where real MCP tool/server names live (tool_name = mcp__<server>__<tool>),
+  # unlike the Prometheus metrics where user-configured MCP servers are redacted to "custom".
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
 service:
   telemetry:
     metrics:
@@ -28,8 +34,8 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [prometheus]
-    # Traces + logs are still accepted so nothing breaks if a client sends them;
-    # they only go to the collector log for now. Wire real backends when needed.
+    # Traces are still accepted so nothing breaks if a client sends them;
+    # they only go to the collector log for now. Wire a real backend when needed.
     traces:
       receivers: [otlp]
       processors: [batch]
@@ -37,4 +43,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [otlphttp/loki, debug]
