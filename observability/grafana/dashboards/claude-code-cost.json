@@ -12,9 +12,9 @@
   "title": "Claude Code — Uso & Custo",
   "uid": "claude-code-cost",
   "schemaVersion": 39,
-  "version": 19,
+  "version": 23,
   "refresh": "30s",
-  "description": "Foco em tokens e tempo. Custo (USD) fica na seção CUSTO, sempre por conta. Counters são séries por sessão que ficam stale ~5min após a sessão terminar; totais usam max_over_time.",
+  "description": "Resumo → skills e MCP → ritmo e composição → investigação → limites estimados → custo e detalhes. Totais usam o máximo dos contadores por sessão observados na janela, não necessariamente apenas o consumo ocorrido nela. Limites são referências configuráveis, não cotas oficiais da Anthropic.",
   "templating": {
     "list": [
       {
@@ -79,7 +79,8 @@
       {
         "name": "limit_tokens_5h",
         "type": "textbox",
-        "label": "limit_tokens_5h",
+        "label": "Referência de tokens (5h)",
+        "hide": 2,
         "query": "50000000",
         "current": {
           "text": "50000000",
@@ -89,7 +90,8 @@
       {
         "name": "limit_tokens_7d",
         "type": "textbox",
-        "label": "limit_tokens_7d",
+        "label": "Referência de tokens (7d)",
+        "hide": 2,
         "query": "300000000",
         "current": {
           "text": "300000000",
@@ -99,7 +101,8 @@
       {
         "name": "limit_cost_5h",
         "type": "textbox",
-        "label": "limit_cost_5h",
+        "label": "Referência de custo (5h, USD)",
+        "hide": 2,
         "query": "25",
         "current": {
           "text": "25",
@@ -109,7 +112,8 @@
       {
         "name": "limit_cost_7d",
         "type": "textbox",
-        "label": "limit_cost_7d",
+        "label": "Referência de custo (7d, USD)",
+        "hide": 2,
         "query": "140",
         "current": {
           "text": "140",
@@ -121,13 +125,955 @@
   "panels": [
     {
       "type": "row",
-      "title": "USO",
+      "title": "VISÃO GERAL",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 0
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Tokens (24h)",
+      "description": "Soma do maior contador de cada sessão observada nas últimas 24h. Janela fixa; sessões iniciadas antes dela podem incluir consumo anterior.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 32
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (user_email) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[24h]))",
+          "legendFormat": "{{user_email}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Tempo ativo",
+      "description": "Tempo ativo acumulado das sessões observadas no período selecionado.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 32
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (user_email) (max_over_time(claude_code_active_time_seconds_total{user_email=~\"$account\"}[$__range]))",
+          "legendFormat": "{{user_email}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Tokens/min ativo",
+      "description": "Tokens acumulados / minutos ativos das sessões observadas no período. Inclui entrada, saída e cache; não mede velocidade de geração da resposta.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 32
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (user_email) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__range])) / clamp_min(sum by (user_email) (max_over_time(claude_code_active_time_seconds_total{user_email=~\"$account\"}[$__range])) / 60, 1)",
+          "legendFormat": "{{user_email}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Cache reutilizado",
+      "description": "cacheRead / (cacheRead + cacheCreation + input), no período selecionado. Mostra quanto do contexto é reaproveitado. Sem meta universal; depende do tipo de tarefa.",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "—"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "text": {
+          "valueSize": 32
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum(max_over_time(claude_code_token_usage_tokens_total{type=\"cacheRead\", user_email=~\"$account\"}[$__range])) / clamp_min(sum(max_over_time(claude_code_token_usage_tokens_total{type=~\"cacheRead|cacheCreation|input\", user_email=~\"$account\"}[$__range])), 1)"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "SKILLS E FERRAMENTAS MCP",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Tokens por skill",
+      "description": "Quais skills concentram tokens? Ranking decrescente dos contadores observados no período selecionado. Tokens sem skill associada são omitidos; não representa todo o consumo da conta.",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "namePlacement": "top",
+        "valueMode": "text",
+        "showUnfilled": false,
+        "minVizHeight": 24,
+        "minVizWidth": 0,
+        "sizing": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sort_desc(sum by (skill_name) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\", skill_name!=\"\"}[$__range])))",
+          "legendFormat": "{{skill_name}}"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Tokens/chamadas por MCP tool",
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 8,
+        "y": 6
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "min": 0,
+          "fieldMinMax": true
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Servidor"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tokens"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Chamadas"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "Chamadas",
+            "desc": true
+          },
+          {
+            "displayName": "Tokens",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "server": "Servidor",
+              "tool": "Ferramenta",
+              "Value": "Tokens",
+              "Value #A": "Tokens",
+              "Value #B": "Chamadas"
+            },
+            "indexByName": {
+              "server": 0,
+              "tool": 1,
+              "Value": 2,
+              "Value #A": 2,
+              "Value #B": 3
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "format": "table",
+          "expr": "sum by (server, tool) (label_replace(label_replace(sum by (mcp_server_name, mcp_tool_name) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\", mcp_tool_name!=\"\", mcp_tool_name!=\"custom\"}[$__range])), \"server\", \"$1\", \"mcp_server_name\", \"(.*)\"), \"tool\", \"$1\", \"mcp_tool_name\", \"(.*)\"))"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "queryType": "instant",
+          "expr": "sum by (server, tool) (count_over_time({service_name=\"claude-code\"} | tool_name=~\"mcp__.+\" | line_format \"{{.tool_name}}\" | regexp \"mcp__(?P<server>.+?)__(?P<tool>.+)\" [$__range]))"
+        }
+      ],
+      "description": "Quais ferramentas concentram uso? Tokens = Prometheus, apenas servidores não redigidos; Chamadas = eventos MCP no Loki, incluindo servidores locais. São métricas distintas: — significa indisponível, não zero. Ordenação inicial por chamadas, depois tokens; clique em Tokens para priorizar consumo. Conta filtra apenas tokens; Modelo não se aplica a este painel. Chamadas consideram todos os logs MCP no período."
+    },
+    {
+      "type": "row",
+      "title": "RITMO DE CONSUMO",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput (tokens / hora)",
+      "description": "Ritmo de consumo por conta: taxa média na janela $__rate_interval, convertida para tokens/h. Inclui cache; não é velocidade de geração nem total de uma hora fechada. Lacunas indicam ausência de amostras.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "axisLabel": "tokens / hora",
+            "axisBorderShow": true,
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (user_email) (rate(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{user_email}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "COMPOSIÇÃO DOS TOKENS",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Tokens por tipo — total observado",
+      "description": "Compara os totais por tipo no período selecionado. Valores explícitos mantêm entrada e saída legíveis mesmo quando cache domina. Cores identificam tipos, não desempenho.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 27
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "input"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Entrada"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "output"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Saída"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cacheRead"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cache lido"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "cyan"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cacheCreation"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cache criado"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "namePlacement": "top",
+        "valueMode": "text",
+        "showUnfilled": false,
+        "minVizHeight": 24,
+        "minVizWidth": 0,
+        "sizing": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sort_desc(sum by (type) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__range])))",
+          "legendFormat": "{{type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens por origem — evolução",
+      "description": "Consumo por janela móvel de $__rate_interval. main = sessão principal · subagent = subagentes · auxiliary = chamadas internas (título, etc).",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 27
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 15,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (query_source) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__rate_interval]))",
+          "legendFormat": "{{query_source}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens por tipo — entrada e saída",
+      "description": "Consumo por janela móvel de $__rate_interval. Entrada e saída usam escala separada dos gráficos de cache, para não desaparecerem sob seu volume. Linhas não empilhadas; cores iguais às do total por tipo.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "axisLabel": "tokens / janela",
+            "axisBorderShow": true,
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "input"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Entrada"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "output"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Saída"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (type) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\", type!~\"cacheRead|cacheCreation\"}[$__rate_interval]))",
+          "legendFormat": "{{type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens por tipo — cache",
+      "description": "Cache lido e criado por janela móvel de $__rate_interval. Escala própria, diferente de entrada/saída; compare valores nas legendas, não a altura entre gráficos. Linhas não empilhadas.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "axisLabel": "tokens / janela",
+            "axisBorderShow": true,
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cacheRead"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cache lido"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "cyan"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cacheCreation"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cache criado"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (type) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\", type=~\"cacheRead|cacheCreation\"}[$__rate_interval]))",
+          "legendFormat": "{{type}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "INVESTIGAÇÃO POR SKILL E MODELO",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens por skill — evolução",
+      "description": "Investigue quando cada skill concentra consumo. Valores por janela móvel de $__rate_interval; tokens sem skill associada são omitidos.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 15,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (skill_name) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\", skill_name!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{skill_name}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens por modelo — evolução",
+      "description": "Consumo por modelo em janelas móveis de $__rate_interval. Respeita os filtros Conta e Modelo.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 15,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (model) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\", model=~\"$model\"}[$__rate_interval]))",
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "LIMITES ESTIMADOS — REFERÊNCIAS, NÃO COTAS OFICIAIS",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 54
       }
     },
     {
@@ -138,7 +1084,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 1
+        "y": 55
       },
       "datasource": {
         "type": "prometheus",
@@ -198,7 +1144,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 1
+        "y": 55
       },
       "datasource": {
         "type": "prometheus",
@@ -258,7 +1204,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 1
+        "y": 55
       },
       "datasource": {
         "type": "prometheus",
@@ -318,7 +1264,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 1
+        "y": 55
       },
       "datasource": {
         "type": "prometheus",
@@ -371,670 +1317,6 @@
       ]
     },
     {
-      "type": "stat",
-      "title": "Tokens (total) por conta",
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 5
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "noValue": "0"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "value_and_name",
-        "colorMode": "none"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (user_email) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[90d]))",
-          "legendFormat": "{{user_email}}"
-        }
-      ]
-    },
-    {
-      "type": "stat",
-      "title": "Tokens (24h) por conta",
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 5
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "noValue": "0"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "value_and_name",
-        "colorMode": "none"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (user_email) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[24h]))",
-          "legendFormat": "{{user_email}}"
-        }
-      ]
-    },
-    {
-      "type": "stat",
-      "title": "Tempo ativo por conta",
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 5
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "noValue": "0"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "value_and_name",
-        "colorMode": "none"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (user_email) (max_over_time(claude_code_active_time_seconds_total{user_email=~\"$account\"}[$__range]))",
-          "legendFormat": "{{user_email}}"
-        }
-      ]
-    },
-    {
-      "type": "stat",
-      "title": "Tokens por minuto ativo",
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 5
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "noValue": "0"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "value_and_name",
-        "colorMode": "none"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (user_email) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__range])) / clamp_min(sum by (user_email) (max_over_time(claude_code_active_time_seconds_total{user_email=~\"$account\"}[$__range])) / 60, 1)",
-          "legendFormat": "{{user_email}}"
-        }
-      ]
-    },
-    {
-      "type": "stat",
-      "title": "Cache hit ratio",
-      "description": "cacheRead / (cacheRead + cacheCreation + input). Alto = contexto reaproveitado, menos custo.",
-      "gridPos": {
-        "h": 6,
-        "w": 6,
-        "x": 0,
-        "y": 9
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "decimals": 2,
-          "min": 0,
-          "max": 1,
-          "noValue": "—",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.5
-              },
-              {
-                "color": "green",
-                "value": 0.8
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "value",
-        "colorMode": "background",
-        "graphMode": "none"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum(max_over_time(claude_code_token_usage_tokens_total{type=\"cacheRead\", user_email=~\"$account\"}[$__range])) / clamp_min(sum(max_over_time(claude_code_token_usage_tokens_total{type=~\"cacheRead|cacheCreation|input\", user_email=~\"$account\"}[$__range])), 1)"
-        }
-      ]
-    },
-    {
-      "type": "piechart",
-      "title": "Mix de tipo de token",
-      "gridPos": {
-        "h": 6,
-        "w": 6,
-        "x": 6,
-        "y": 9
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "pieType": "donut",
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "values": [
-            "value",
-            "percent"
-          ]
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (type) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__range]))",
-          "legendFormat": "{{type}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Throughput (tokens / hora)",
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 12,
-        "y": 9
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 10,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (user_email) (rate(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__rate_interval])) * 3600",
-          "legendFormat": "{{user_email}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Tokens por tipo (/ bucket)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 15
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 15,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (type) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__rate_interval]))",
-          "legendFormat": "{{type}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Tokens por modelo (/ bucket)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 15
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 15,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (model) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\", model=~\"$model\"}[$__rate_interval]))",
-          "legendFormat": "{{model}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Tokens por query_source (/ bucket)",
-      "description": "main = sessão principal · subagent = subagentes · auxiliary = chamadas internas (título, etc).",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 23
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 15,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (query_source) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[$__rate_interval]))",
-          "legendFormat": "{{query_source}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Tokens por skill (/ bucket)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 23
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "fillOpacity": 15,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (skill_name) (increase(claude_code_token_usage_tokens_total{user_email=~\"$account\", skill_name!=\"\"}[$__rate_interval]))",
-          "legendFormat": "{{skill_name}}"
-        }
-      ]
-    },
-    {
-      "type": "piechart",
-      "title": "Tokens por skill",
-      "description": "Tokens gastos dentro de skills. Tokens sem skill associada são omitidos.",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 31
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "pieType": "donut",
-        "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "values": [
-            "value",
-            "percent"
-          ]
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (skill_name) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\", skill_name!=\"\"}[$__range]))",
-          "legendFormat": "{{skill_name}}"
-        }
-      ]
-    },
-    {
-      "type": "table",
-      "title": "Tokens/chamadas por MCP tool",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 31
-      },
-      "datasource": {
-        "type": "datasource",
-        "uid": "-- Mixed --"
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Tokens (Prometheus)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Chamadas (Loki, MCP local)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "short"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background",
-                  "mode": "gradient"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true
-      },
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            }
-          }
-        },
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            },
-            "renameByName": {
-              "server": "Servidor",
-              "tool": "Tool",
-              "Value #A": "Tokens (Prometheus)",
-              "Value #B": "Chamadas (Loki, MCP local)"
-            },
-            "indexByName": {
-              "server": 0,
-              "tool": 1,
-              "Value #A": 2,
-              "Value #B": 3
-            }
-          }
-        }
-      ],
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "instant": true,
-          "format": "table",
-          "expr": "sum by (server, tool) (label_replace(label_replace(sum by (mcp_server_name, mcp_tool_name) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\", mcp_tool_name!=\"\", mcp_tool_name!=\"custom\"}[$__range])), \"server\", \"$1\", \"mcp_server_name\", \"(.*)\"), \"tool\", \"$1\", \"mcp_tool_name\", \"(.*)\"))"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "queryType": "instant",
-          "expr": "sum by (server, tool) (count_over_time({service_name=\"claude-code\"} | tool_name=~\"mcp__.+\" | line_format \"{{.tool_name}}\" | regexp \"mcp__(?P<server>.+?)__(?P<tool>.+)\" [$__range]))"
-        }
-      ],
-      "description": "Combina 2 fontes: (A) Prometheus - tokens reais de MCP servers que a Anthropic nao redige (built-in / proxy claude.ai, ex. conectores do Claude Desktop); (B) Loki - contagem de chamadas dos SEUS MCP servers locais (context7, playwright, github, etc.), que o Prometheus sempre rotula como \"custom\" por redacao de privacidade (sem token count disponivel para esses, so contagem de chamadas)."
-    },
-    {
-      "type": "stat",
-      "title": "Linhas de código (total) por conta",
-      "gridPos": {
-        "h": 4,
-        "w": 24,
-        "x": 0,
-        "y": 43
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "noValue": "0"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "value_and_name",
-        "colorMode": "none"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (user_email, type) (max_over_time(claude_code_lines_of_code_count_total{user_email=~\"$account\"}[90d]))",
-          "legendFormat": "{{user_email}} {{type}}"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Linhas de código modificadas (/ bucket)",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 47
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "noValue": "0"
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (type) (increase(claude_code_lines_of_code_count_total{user_email=~\"$account\"}[$__rate_interval]))",
-          "legendFormat": "{{type}}"
-        }
-      ]
-    },
-    {
       "type": "row",
       "title": "CUSTO",
       "collapsed": false,
@@ -1042,7 +1324,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 59
       }
     },
     {
@@ -1052,7 +1334,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 60
       },
       "datasource": {
         "type": "prometheus",
@@ -1093,7 +1375,7 @@
         "h": 4,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 60
       },
       "datasource": {
         "type": "prometheus",
@@ -1134,7 +1416,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 65
+        "y": 64
       },
       "datasource": {
         "type": "prometheus",
@@ -1170,7 +1452,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 65
+        "y": 64
       },
       "datasource": {
         "type": "prometheus",
@@ -1203,7 +1485,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 72
       },
       "datasource": {
         "type": "prometheus",
@@ -1239,11 +1521,22 @@
       ]
     },
     {
+      "type": "row",
+      "title": "DETALHAMENTO POR CONTA E SESSÃO",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 81
+      }
+    },
+    {
       "type": "table",
       "title": "Custo por conta e modelo (90d)",
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 5,
+        "w": 24,
         "x": 0,
         "y": 82
       },
@@ -1300,10 +1593,10 @@
       "type": "table",
       "title": "Por sessão — tokens, tempo e custo",
       "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 12,
-        "y": 82
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 87
       },
       "datasource": {
         "type": "prometheus",
@@ -1428,6 +1721,127 @@
               "Value #C": 4
             }
           }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "ATIVIDADE E HISTÓRICO",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 95
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Tokens por conta — histórico de 90d",
+      "description": "Soma do maior contador de cada sessão observada nos últimos 90 dias. Janela fixa, independente do período selecionado.",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 96
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (user_email) (max_over_time(claude_code_token_usage_tokens_total{user_email=~\"$account\"}[90d]))",
+          "legendFormat": "{{user_email}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Linhas de código por conta — histórico de 90d",
+      "gridPos": {
+        "h": 4,
+        "w": 16,
+        "x": 8,
+        "y": 96
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (user_email, type) (max_over_time(claude_code_lines_of_code_count_total{user_email=~\"$account\"}[90d]))",
+          "legendFormat": "{{user_email}} {{type}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Linhas de código modificadas — evolução",
+      "description": "Linhas adicionadas/removidas por janela móvel de $__rate_interval. Indicador de atividade, não de qualidade ou produtividade.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 100
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (type) (increase(claude_code_lines_of_code_count_total{user_email=~\"$account\"}[$__rate_interval]))",
+          "legendFormat": "{{type}}"
         }
       ]
     }

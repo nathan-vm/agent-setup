@@ -60,6 +60,27 @@ services:
       - loki
     restart: unless-stopped
 
+  # OPCIONAL (perfil "autogen"): gera/atualiza um dashboard por conta a cada 60s,
+  # detectando novos user_email automaticamente. Ligue com:
+  #   docker compose --profile autogen up -d
+  # Sem o perfil, gere manualmente no host:
+  #   node observability/grafana/generate-account-dashboards.mjs
+  dashboard-generator:
+    image: node:22-alpine
+    profiles: ["autogen"]
+    environment:
+      - PROM_URL=http://prometheus:9090
+    volumes:
+      - ./grafana:/work/grafana
+    working_dir: /work
+    command:
+      - sh
+      - -c
+      - "while true; do node /work/grafana/generate-account-dashboards.mjs || echo 'geracao falhou'; sleep 60; done"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   prometheus-data:
   grafana-data:

@@ -1,0 +1,3 @@
+# Dashboards por conta gerados por generate-account-dashboards.mjs.
+# São derivados do mestre e específicos dos emails desta máquina — não versionar.
+grafana/dashboards/accounts/
