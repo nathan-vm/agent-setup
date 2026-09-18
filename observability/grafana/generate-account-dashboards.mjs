@@ -342,8 +342,9 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
     });
   }
 
-  // The server panel's link points at the account's own dashboard. It lives in an
-  // override (only on the name column), not in defaults.
+  // The drill-down links point at the account's own dashboard. On the tables they
+  // live in an override (only on the column that is clickable); on the pie chart
+  // they live in defaults, since every slice is the same field.
   for (const panel of allPanels(dashboard)) {
     const linkLists = [
       panel.fieldConfig?.defaults?.links,

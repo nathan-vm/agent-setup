@@ -123,6 +123,28 @@
           "value": "21500000"
         },
         "hide": 2
+      },
+      {
+        "name": "skill",
+        "type": "textbox",
+        "hide": 2,
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "options": []
+      },
+      {
+        "name": "source",
+        "type": "textbox",
+        "hide": 2,
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "options": []
       }
     ]
   },
@@ -626,6 +648,23 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Skill"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Break down ${__value.text}",
+                    "url": "/d/__DASHBOARD__/?var-skill=${__value.text}&viewPanel=panel-12&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Tokens"
             },
             "properties": [
@@ -745,8 +784,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Ver ferramentas de ${__value.text}",
-                    "url": "/d/__DASHBOARD__/?var-server=${__value.text}&${__url_time_range}"
+                    "title": "Break down ${__value.text}",
+                    "url": "/d/__DASHBOARD__/?var-server=${__value.text}&viewPanel=panel-11&${__url_time_range}"
                   }
                 ]
               }
@@ -877,7 +916,13 @@
               "tooltip": false,
               "viz": false
             }
-          }
+          },
+          "links": [
+            {
+              "title": "Break down ${__field.name}",
+              "url": "/d/__DASHBOARD__/?var-source=${__field.name}&viewPanel=panel-13&${__url_time_range}"
+            }
+          ]
         },
         "overrides": []
       },
@@ -910,7 +955,7 @@
     },
     {
       "type": "row",
-      "title": "MCP TOOLS — PER-TOOL BREAKDOWN",
+      "title": "BREAKDOWN",
       "collapsed": true,
       "panels": [
         {
@@ -1020,6 +1065,246 @@
                   "Field": "Server · Tool",
                   "Last": "Tokens",
                   "Last *": "Tokens"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "table",
+          "title": "Tokens by skill, model and effort",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 30,
+            "w": 24,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(label_replace(sum by (skill, model, effort) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"skills\"} | user_email =~ `$account` | skill_owner =~ `$owner` | skill =~ `$skill` | unwrap tokens [$__range])), \"model\", \"$1\", \"model\", \"claude-(.+)\"), \"model\", \"$1\", \"model\", \"(.+)-[0-9]{8}$\")",
+              "queryType": "instant",
+              "hide": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false,
+                "filterable": true
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Tokens"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "Tokens"
+              ],
+              "countRows": false,
+              "enablePagination": false
+            },
+            "sortBy": [
+              {
+                "displayName": "Tokens",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "skill": 0,
+                  "model": 1,
+                  "effort": 2,
+                  "Value": 3,
+                  "Value #A": 3
+                },
+                "renameByName": {
+                  "skill": "Skill",
+                  "model": "Model",
+                  "effort": "Effort",
+                  "Value": "Tokens",
+                  "Value #A": "Tokens"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "table",
+          "title": "Tokens by model and effort",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 24,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(label_replace(sum by (model, effort) (sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | label_format source=`{{ if eq .query_source \"repl_main_thread\" }}main{{ else if hasPrefix \"agent:\" .query_source }}subagent{{ else }}auxiliary{{ end }}` | source =~ `$source` | unwrap input_tokens [$__range])) + sum by (model, effort) (sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | label_format source=`{{ if eq .query_source \"repl_main_thread\" }}main{{ else if hasPrefix \"agent:\" .query_source }}subagent{{ else }}auxiliary{{ end }}` | source =~ `$source` | unwrap output_tokens [$__range])) + sum by (model, effort) (sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | label_format source=`{{ if eq .query_source \"repl_main_thread\" }}main{{ else if hasPrefix \"agent:\" .query_source }}subagent{{ else }}auxiliary{{ end }}` | source =~ `$source` | unwrap cache_creation_tokens [$__range])), \"model\", \"$1\", \"model\", \"claude-(.+)\"), \"model\", \"$1\", \"model\", \"(.+)-[0-9]{8}$\")",
+              "queryType": "instant",
+              "hide": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false,
+                "filterable": true
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Tokens"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "Tokens"
+              ],
+              "countRows": false,
+              "enablePagination": false
+            },
+            "sortBy": [
+              {
+                "displayName": "Tokens",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "model": 0,
+                  "effort": 1,
+                  "Value": 2,
+                  "Value #A": 2
+                },
+                "renameByName": {
+                  "model": "Model",
+                  "effort": "Effort",
+                  "Value": "Tokens",
+                  "Value #A": "Tokens"
                 }
               }
             }

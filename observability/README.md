@@ -299,7 +299,7 @@ The old generation is orphaned and ages out with the 90-day retention.
 
 ## The panels
 
-Eleven panels in five sections, two of them collapsed by default. Reading top to
+Thirteen panels in five sections, two of them collapsed by default. Reading top to
 bottom, they answer: *how much can I still spend* → *where is it going* → *is my
 rate high right now*.
 
@@ -354,12 +354,47 @@ skill is behind `third-party`, the Skills and tools table answers.
 | Panel | What it decides |
 |-------|-----------------|
 | **Tokens by skill** (table) | Which skill consumes most, with its real name. |
-| **Tokens by MCP server** (table) | Which server consumes most. Clicking the name filters the detail section. |
+| **Tokens by MCP server** (table) | Which server consumes most. |
 | **Tokens by source** (donut) | Main thread, subagents, or auxiliary calls. |
 
-Below them, in the collapsed **"MCP tools — per-tool breakdown"** section, a table
-with the finest cut: what each specific call cost. Same pattern as the weekly
-breakdown — the granular cut stays collapsed, right below the panel it details.
+All three are clickable, and each opens its own table in the collapsed
+**"Breakdown"** section below:
+
+| Click | Opens | Showing |
+|---|---|---|
+| a server name | **Tokens by MCP tool** | what each specific call of that server cost |
+| a skill name | **Tokens by skill, model and effort** | which model and effort that skill ran on |
+| a donut slice | **Tokens by model and effort** | the models behind that origin |
+
+Same pattern as the weekly breakdown — the granular cut stays collapsed, right
+below the panels it details.
+
+#### How a click opens a collapsed section
+
+A link sets the filter variable and adds `viewPanel=panel-<id>`, which opens that
+one table full screen, already filtered; "Back to dashboard" returns. It has to
+work that way because **a row's collapsed state does not exist in the URL** — it
+lives in the dashboard JSON, so no link can expand a section. `viewPanel` does
+resolve a panel that sits inside a collapsed row (verified on this Grafana), which
+is what makes the drill-down possible at all.
+
+The two drill-down variables, `skill` and `source`, are **textbox** variables, not
+the `custom` dropdowns used for `server` and `owner`. A skill name can contain a
+colon (`superpowers:brainstorming`) and Grafana re-parses a custom variable's
+`query` on that character, truncating the value — the same trap that broke the
+owner filter before.
+
+`source` is not a label in the data: the donut separates main / subagent /
+auxiliary with regexes over `query_source`. The table turns that same rule into a
+real label with `label_format`, so the clicked origin can be filtered by a
+variable. Its totals were checked against the donut's three queries and match to
+the token: main 5,714,385, subagent 2,959,681, auxiliary 1,327,210.
+
+**The skill drill-down reads the exporter's stream, not OTel** — the same source as
+the "Tokens by skill" table above it, with the un-redacted names. Clicking a row
+there always finds data here; against OTel a plugin skill would be `third-party`
+and the click would land on nothing. Verified per skill: `code-review` 1,075,077 in
+both, `superpowers:brainstorming` 63,290 in both.
 
 The tables carry a bar inside the cell and come sorted highest first. Tables
 rather than bar charts for two practical reasons: they sort natively, and they
