@@ -6,8 +6,14 @@ providers:
     folder: ""
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 30
-    allowUiUpdates: true
+    # 300s: the generator writes every 10min, so re-reading every 30s was pure
+    # waste — Grafana re-parses every dashboard on disk each time.
+    updateIntervalSeconds: 300
+    # false on purpose: the dashboards here are generated from the template. With
+    # true, the first UI touch unlinks a dashboard from provisioning and Grafana
+    # serves the database copy forever, silently ignoring the file — which is
+    # exactly what happened once (a dashboard stayed pinned to an old version).
+    allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards
       foldersFromFilesStructure: false

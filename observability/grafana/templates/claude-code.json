@@ -1,0 +1,1739 @@
+{
+  "uid": "claude-code",
+  "title": "Claude Code",
+  "description": "Template. The generator writes one dashboard per account from this file — do not provision it directly.",
+  "tags": [
+    "claude-code"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "5m",
+  "graphTooltip": 1,
+  "time": {
+    "from": "now/w+9h+24h",
+    "to": "now"
+  },
+  "timepicker": {
+    "quick_ranges": [
+      {
+        "display": "Current week (from Mon 9am)",
+        "from": "now/w+9h+24h",
+        "to": "now"
+      },
+      {
+        "display": "Current day (from 9am)",
+        "from": "now/d+9h",
+        "to": "now"
+      },
+      {
+        "display": "Last 5 hours",
+        "from": "now-5h",
+        "to": "now"
+      },
+      {
+        "display": "Last 24 hours",
+        "from": "now-24h",
+        "to": "now"
+      },
+      {
+        "display": "Last 7 days",
+        "from": "now-7d",
+        "to": "now"
+      },
+      {
+        "display": "Last 30 days",
+        "from": "now-30d",
+        "to": "now"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "account",
+        "label": "Account",
+        "type": "constant",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 2
+      },
+      {
+        "name": "server",
+        "label": "MCP server",
+        "type": "custom",
+        "query": ".*",
+        "options": [
+          {
+            "text": "All",
+            "value": ".*",
+            "selected": true
+          }
+        ],
+        "current": {
+          "text": "All",
+          "value": ".*"
+        },
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "owner",
+        "label": "Skill owner",
+        "type": "custom",
+        "query": ".*",
+        "options": [
+          {
+            "text": "All",
+            "value": ".*",
+            "selected": true
+          }
+        ],
+        "current": {
+          "text": "All",
+          "value": ".*"
+        },
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "limit_tokens_5h",
+        "label": "Token reference (5h block)",
+        "type": "textbox",
+        "query": "1750000",
+        "current": {
+          "text": "1750000",
+          "value": "1750000"
+        },
+        "hide": 2
+      },
+      {
+        "name": "limit_tokens_week",
+        "label": "Token reference (week)",
+        "type": "textbox",
+        "query": "21500000",
+        "current": {
+          "text": "21500000",
+          "value": "21500000"
+        },
+        "hide": 2
+      },
+      {
+        "name": "skill",
+        "type": "textbox",
+        "hide": 2,
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "options": []
+      },
+      {
+        "name": "source",
+        "type": "textbox",
+        "hide": 2,
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "OVERVIEW",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 1,
+      "type": "gauge",
+      "title": "5h block limit — % used",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "(vector(100) < (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap block_tokens [30m]) by (user_email)) / $limit_tokens_5h)) or (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap block_tokens [30m]) by (user_email)) / $limit_tokens_5h)",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "minVizWidth": 75,
+        "minVizHeight": 75,
+        "sizing": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "Weekly limit — % used",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "(vector(100) < (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap week_tokens [30m]) by (user_email)) / $limit_tokens_week)) or (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap week_tokens [30m]) by (user_email)) / $limit_tokens_week)",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 60
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "minVizWidth": 75,
+        "minVizHeight": 75,
+        "sizing": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Cache reuse",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap cache_read_tokens [$__range])) / (sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap cache_read_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap input_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap cache_creation_tokens [$__range])))",
+          "queryType": "range",
+          "hide": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 4,
+      "type": "piechart",
+      "title": "Tokens by model",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (model)(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap input_tokens [$__range])) + sum by (model)(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap output_tokens [$__range])) + sum by (model)(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap cache_creation_tokens [$__range]))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "WEEKLY BREAKDOWN",
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Weekly breakdown",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 24,
+            "h": 11
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(label_replace(100 * (sum by (skill_name, model, effort, query_source)(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap input_tokens [$__range])) + sum by (skill_name, model, effort, query_source)(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap output_tokens [$__range])) + sum by (skill_name, model, effort, query_source)(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap cache_creation_tokens [$__range]))) / $limit_tokens_week, \"model\", \"$1\", \"model\", \"claude-(.+)\"), \"model\", \"$1\", \"model\", \"(.+)-[0-9]{8}$\")",
+              "queryType": "instant",
+              "hide": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 2,
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false,
+                "filterable": true
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "% of weekly limit"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "max",
+                    "value": 10
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "% of weekly limit"
+              ],
+              "countRows": false,
+              "enablePagination": false
+            },
+            "sortBy": [
+              {
+                "displayName": "% of weekly limit",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "model": 0,
+                  "effort": 1,
+                  "query_source": 2,
+                  "skill_name": 3,
+                  "Value": 4,
+                  "Value #A": 4
+                },
+                "renameByName": {
+                  "skill_name": "Skill",
+                  "model": "Model",
+                  "effort": "Effort",
+                  "query_source": "Source",
+                  "Value": "% of weekly limit",
+                  "Value #A": "% of weekly limit"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "type": "row",
+      "title": "SKILLS AND TOOLS",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Tokens by skill",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (skill) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"skills\"} | user_email =~ `$account` | skill_owner =~ `$owner` | unwrap tokens [$__range]))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "{{skill}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Skill"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Break down ${__value.text}",
+                    "url": "/d/__DASHBOARD__/?var-skill=${__value.text}&viewPanel=panel-12&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tokens"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "Tokens"
+          ],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Tokens",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "reducers": [
+              "lastNotNull"
+            ],
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {
+              "Field": "Skill",
+              "Last": "Tokens",
+              "Last *": "Tokens"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Tokens by MCP server",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 9,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (mcp_server) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"tools\"} | user_email =~ `$account` | tool_source = `mcp` | mcp_server =~ `$server` | unwrap tokens_attributed [$__range]))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "{{mcp_server}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Server"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Break down ${__value.text}",
+                    "url": "/d/__DASHBOARD__/?var-server=${__value.text}&viewPanel=panel-11&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tokens"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "Tokens"
+          ],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Tokens",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "reducers": [
+              "lastNotNull"
+            ],
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {
+              "Field": "Server",
+              "Last": "Tokens",
+              "Last *": "Tokens"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "piechart",
+      "title": "Tokens by source",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 9,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source = `repl_main_thread` | unwrap input_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source = `repl_main_thread` | unwrap output_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source = `repl_main_thread` | unwrap cache_creation_tokens [$__range]))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "main"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source =~ `agent:.*` | unwrap input_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source =~ `agent:.*` | unwrap output_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source =~ `agent:.*` | unwrap cache_creation_tokens [$__range]))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "subagent"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source !~ `repl_main_thread|agent:.*` | unwrap input_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source !~ `repl_main_thread|agent:.*` | unwrap output_tokens [$__range])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | query_source !~ `repl_main_thread|agent:.*` | unwrap cache_creation_tokens [$__range]))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "auxiliary"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "links": [
+            {
+              "title": "Break down ${__field.name}",
+              "url": "/d/__DASHBOARD__/?var-source=${__field.name}&viewPanel=panel-13&${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": [
+          "percent"
+        ],
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "BREAKDOWN",
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Tokens by MCP tool",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 20,
+            "w": 24,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "editorMode": "code",
+              "expr": "sum by (mcp_server, mcp_tool) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"tools\"} | user_email =~ `$account` | tool_source = `mcp` | mcp_server =~ `$server` | unwrap tokens_attributed [$__range]))",
+              "queryType": "range",
+              "hide": false,
+              "legendFormat": "{{mcp_server}} · {{mcp_tool}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false,
+                "filterable": true
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Tokens"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "Tokens"
+              ],
+              "countRows": false,
+              "enablePagination": false
+            },
+            "sortBy": [
+              {
+                "displayName": "Tokens",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "reduce",
+              "options": {
+                "reducers": [
+                  "lastNotNull"
+                ],
+                "mode": "seriesToRows"
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {},
+                "renameByName": {
+                  "Field": "Server · Tool",
+                  "Last": "Tokens",
+                  "Last *": "Tokens"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "table",
+          "title": "Tokens by skill, model and effort",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 30,
+            "w": 24,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(label_replace(sum by (skill, model, effort) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"skills\"} | user_email =~ `$account` | skill_owner =~ `$owner` | skill =~ `$skill` | unwrap tokens [$__range])), \"model\", \"$1\", \"model\", \"claude-(.+)\"), \"model\", \"$1\", \"model\", \"(.+)-[0-9]{8}$\")",
+              "queryType": "instant",
+              "hide": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false,
+                "filterable": true
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Tokens"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "Tokens"
+              ],
+              "countRows": false,
+              "enablePagination": false
+            },
+            "sortBy": [
+              {
+                "displayName": "Tokens",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "skill": 0,
+                  "model": 1,
+                  "effort": 2,
+                  "Value": 3,
+                  "Value #A": 3
+                },
+                "renameByName": {
+                  "skill": "Skill",
+                  "model": "Model",
+                  "effort": "Effort",
+                  "Value": "Tokens",
+                  "Value #A": "Tokens"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "table",
+          "title": "Tokens by model and effort",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 24,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "editorMode": "code",
+              "expr": "label_replace(label_replace(sum by (model, effort) (sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | label_format source=`{{ if eq .query_source \"repl_main_thread\" }}main{{ else if hasPrefix \"agent:\" .query_source }}subagent{{ else }}auxiliary{{ end }}` | source =~ `$source` | unwrap input_tokens [$__range])) + sum by (model, effort) (sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | label_format source=`{{ if eq .query_source \"repl_main_thread\" }}main{{ else if hasPrefix \"agent:\" .query_source }}subagent{{ else }}auxiliary{{ end }}` | source =~ `$source` | unwrap output_tokens [$__range])) + sum by (model, effort) (sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | label_format source=`{{ if eq .query_source \"repl_main_thread\" }}main{{ else if hasPrefix \"agent:\" .query_source }}subagent{{ else }}auxiliary{{ end }}` | source =~ `$source` | unwrap cache_creation_tokens [$__range])), \"model\", \"$1\", \"model\", \"claude-(.+)\"), \"model\", \"$1\", \"model\", \"(.+)-[0-9]{8}$\")",
+              "queryType": "instant",
+              "hide": false
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false,
+                "filterable": true
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Tokens"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": true,
+              "reducer": [
+                "sum"
+              ],
+              "fields": [
+                "Tokens"
+              ],
+              "countRows": false,
+              "enablePagination": false
+            },
+            "sortBy": [
+              {
+                "displayName": "Tokens",
+                "desc": true
+              }
+            ]
+          },
+          "transformations": [
+            {
+              "id": "labelsToFields",
+              "options": {}
+            },
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "model": 0,
+                  "effort": 1,
+                  "Value": 2,
+                  "Value #A": 2
+                },
+                "renameByName": {
+                  "model": "Model",
+                  "effort": "Effort",
+                  "Value": "Tokens",
+                  "Value #A": "Tokens"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "type": "row",
+      "title": "CONSUMPTION RATE",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Consumption rate (tokens / hour)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "tokens/hour"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email)) > __CUT_P75__",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "above P75"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email)) > __CUT_OUTLIER__",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "outlier"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email)) > __CUT_EXTREME__",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "far out"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "pointSize": 5,
+            "axisPlacement": "auto",
+            "axisLabel": "tokens / hour",
+            "spanNulls": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 766008
+              },
+              {
+                "color": "orange",
+                "value": 1721058
+              },
+              {
+                "color": "red",
+                "value": 2676108
+              }
+            ]
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "D"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "interval": "5m"
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Rate by type — input and output",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_input [10m]) by (user_email))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "input"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_output [10m]) by (user_email))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "output"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "pointSize": 5,
+            "axisPlacement": "auto",
+            "axisLabel": "tokens / hora",
+            "spanNulls": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "input"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "custom.thresholdsStyle",
+                "value": {
+                  "mode": "dashed"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 766008
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1721058
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "output"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              },
+              {
+                "id": "custom.thresholdsStyle",
+                "value": {
+                  "mode": "dashed"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 766008
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1721058
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "interval": "5m"
+    }
+  ]
+}

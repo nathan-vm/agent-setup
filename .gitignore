@@ -1,0 +1,16 @@
+# Tudo abaixo é específico desta máquina: contém emails, caminhos locais ou
+# arquivos derivados. Cada entrada tem um modelo versionado ao lado.
+
+# Dashboards gerados por observability/grafana/generate-account-dashboards.mjs,
+# um por conta. Derivados do template e nomeados pelo email.
+observability/grafana/dashboards/accounts/
+
+# Limites por conta e lista de contas ignoradas — contém emails.
+# Modelo: observability/grafana/account-limits.example.json
+observability/grafana/account-limits.json
+
+# Configuração do stack: caminhos locais e escolha de quais contas monitorar.
+# Modelo: observability/.env.example — o wizard (bin/agent-setup) gera os dois.
+observability/.env
+observability/.env.bak*
+observability/docker-compose.override.yml
