@@ -378,46 +378,70 @@ The source donut groups `query_source`, which arrives detailed in Loki
 
 ### Consumption rate
 
-Two line charts in tokens/hour, measured over **fixed 15-minute windows**. Idle
-periods drop to zero (`or vector(0)`) rather than becoming gaps. The second one
-splits input from output (blue = input, purple = output).
+Two line charts in tokens/hour. This panel is a **speedometer**, not a budget
+meter: it answers "am I fast or slow right now" so you can judge whether that
+speed is warranted — a session firing many tools and MCP calls, or an agent that
+quietly spawned 30 subagents and started accelerating on its own. It says nothing
+about the limit; the gauges above do that.
 
-The window is fixed rather than `$__interval` for a specific reason: the cutlines
-are precomputed, and they only make sense if computed over exactly the same
-distribution the graph draws. The same activity measured over different windows
-gives very different hourly rates — on this machine the P75 jumped from 473k (1h
-windows) to 810k (5min windows), because a 5-minute burst has a far higher hourly
-rate than the same activity spread over an hour. 15 minutes is the middle ground:
-1h smeared a 5min burst into a 1h-wide rectangle, 5min was too noisy.
+The curve is an **exponentially weighted moving average** with a 20-minute
+half-life (`RATE_HALFLIFE` in `.env`), computed by the exporter's rate-meter and
+published into Loki, because LogQL has no EWMA.
 
-The price is that on very wide ranges (30d) the graph's step exceeds 15min and the
-series becomes a sampling of rates rather than continuous coverage.
+It used to be `sum_over_time(tokens[15m]) * 4` computed directly in the panel.
+That is a boxcar, and on real data it behaved badly enough to make the panel
+useless:
+
+| | boxcar | EWMA 20m |
+|---|---|---|
+| jitter between consecutive points | 451,185 tokens/h | **44,296** |
+| peak ÷ P75 cutline | 9.9× | **6.0×** |
+| when a session stops | 30× drop in one 5-min step | ~50-minute glide |
+
+The jitter is why crossing the line meant nothing: the chart was a field of
+needles, and the peaks towered so far above the cutline that the line sat squashed
+at the floor. And the cliff misrepresented reality — stopping does not mean you
+were instantly slow, it means you decelerated.
+
+The half-life is part of the **stream labels** on purpose. Loki cannot replace
+derived data, so changing it would otherwise mix two different maths in one
+series; as a label, a new value simply starts a fresh series and the old one ages
+out with retention.
+
+The rate-meter backfills the series on its first run (14 days by default,
+`RATE_BACKFILL_DAYS`). The history is not lost — this Loki accepts old samples on
+purpose.
 
 ### The two cutlines
 
 Both are computed by the `dashboard-generator` over **that account's** last 7
-days, **discarding idle periods** — including zeros would pull the quantiles down
-and the line would only mean "is using", not "is using a lot":
+days, as quantiles of the very same smoothed curve the panel draws:
 
 | Line | What it is | What it means |
 |---|---|---|
 | yellow | P75 | Above it you are in the busiest quarter of your own normal. |
 | orange | Q3 + 1.5×IQR (Tukey's fence) | Above it is not "busy", it is atypical. Worth looking at what ran there. |
 
-Checked against this machine's real series: 25% of samples above the yellow line
-(which is what P75 means) and 5% above the orange one.
+They are computed **only over buckets that actually contained requests**. An EWMA
+never quite reaches zero, so after a busy stretch it leaves a long tail of small
+positive values — measured here, 76% of the "non-zero" points were tail rather
+than work. Taking quantiles over that collapses the line (P75 fell from 560k to
+274k and the peaks went to 12× above it). Masking by real activity also matches
+what the line is supposed to mean: *faster than I usually run **while working***.
 
-The values vary a lot between accounts — 765k/1.71M on one, 1.89M/4.43M on another
+The values vary a lot between accounts — 555k/1.01M on one, 1.49M/3.25M on another
 — which is why they are per account rather than constants.
 
 The input/output panel has cutlines **of its own per series**, computed only over
-that series. Input and output differ by an order of magnitude — here, a P75 of 45k
-for input against 144k for output — so using the total's cutline there would
-compare different things.
+that series. Input and output differ by an order of magnitude, so using the
+total's cutline there would compare different things.
 
-LogQL has no quantile over an aggregate (you can take a quantile of individual
-values, not of the buckets the graph draws), which is why the computation lives in
-the generator.
+Two things have to stay in sync here, and both have burned this dashboard before:
+the generator must read the same `RATE_HALFLIFE` as the exporter (hence one
+variable in `.env`, in one format), and the cutlines must be quantiles of the
+curve actually drawn. An earlier version computed them over 1h windows while the
+graph drew 15min ones, which put the line at 782k under a curve whose real P75 was
+1.09M — a line that lies.
 
 ### Time range
 
@@ -477,7 +501,7 @@ The intervals are tuned for the data to be useful, not instantaneous:
 | Component | Interval | Why |
 |---|---|---|
 | Claude Code → collector | 60s (metrics), 30s (logs) | runs in EVERY session; was 10s/5s |
-| `transcript-exporter` | 120s | each pass scans hundreds of transcripts |
+| `transcript-exporter` | 120s | each pass scans hundreds of transcripts and publishes the rate curve |
 | `dashboard-generator` | 600s | spawns a Node process and queries 7–30 days |
 | Grafana re-provision | 300s | re-parses every dashboard on disk |
 | Prometheus scrape | 60s | only used to list accounts; the panels read Loki |

@@ -1067,7 +1067,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "((sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap input_tokens [15m])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap output_tokens [15m])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap cache_creation_tokens [15m]))) or vector(0)) * 4",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [$__interval]) by (user_email))",
           "queryType": "range",
           "hide": false,
           "legendFormat": "tokens/hour"
@@ -1162,7 +1162,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "(sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap input_tokens [15m])) or vector(0)) * 4",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_input [$__interval]) by (user_email))",
           "queryType": "range",
           "hide": false,
           "legendFormat": "input"
@@ -1174,7 +1174,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "(sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap output_tokens [15m])) or vector(0)) * 4",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_output [$__interval]) by (user_email))",
           "queryType": "range",
           "hide": false,
           "legendFormat": "output"

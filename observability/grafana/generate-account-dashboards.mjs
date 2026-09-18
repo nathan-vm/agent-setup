@@ -54,8 +54,10 @@ const outDir = join(here, 'dashboards', 'accounts');
 // cutlines are computed over a different distribution than the graph draws — a
 // 5min burst has a far higher hourly rate than the same activity spread over 1h,
 // and the line ends up far too low.
-const RATE_WINDOW = '15m';
-const RATE_TO_HOUR = 4;
+// Must match the exporter's RATE_HALFLIFE_S: the cutlines have to be computed
+// over the very same curve the graph draws. Getting this wrong once already put
+// the line at 782k under a curve whose real P75 was 1.09M — a line that lies.
+const RATE_HALFLIFE = process.env.RATE_HALFLIFE || '20m';
 // Used when an account has too little history for statistics of its own.
 const CUTLINE_FALLBACK = { p75: 766_008, outlier: 1_721_058 };
 
@@ -115,28 +117,39 @@ function quantile(sorted, q) {
 //
 // LogQL has no quantile over an aggregate (you can take a quantile of individual
 // values, not of the buckets the graph draws), which is why this lives here.
-async function rateCutlines(email, fields = ['input_tokens', 'output_tokens', 'cache_creation_tokens']) {
-  const selector = '{service_name="claude-code"} | event_name = `api_request` '
-    + `| user_email =~ \`${escapeRegex(email)}\``;
+async function rateCutlines(email, field = 'rate') {
+  const pattern = escapeRegex(email);
   try {
-    // One scan per field, summed here. The "total" used to ask Loki for a fourth
-    // expression that re-scanned input and output — already fetched by the
-    // individual calls — every cycle, forever. Summing in JS also avoids the case
-    // where a field with no samples empties the whole sum in LogQL.
-    // stepSeconds = the window: 15min samples taken every 5min overlap and skew
-    // the quantile.
-    const series = await Promise.all(fields.map((field) => lokiQueryRange(
-      `sum(sum_over_time(${selector} | unwrap ${field} [${RATE_WINDOW}]))`,
-      { hours: 7 * 24, stepSeconds: 900 },
-    )));
-    const byInstant = new Map();
-    for (const result of series) {
-      for (const [ts, value] of result[0]?.values ?? []) {
-        byInstant.set(ts, (byInstant.get(ts) ?? 0) + Number(value));
-      }
-    }
-    const values = [...byInstant.values()]
-      .map((value) => value * RATE_TO_HOUR)
+    // Read the same smoothed series the panel plots, rather than recomputing a
+    // rate here. Anything else and the cutline describes a distribution the user
+    // is not looking at.
+    //
+    // The second query is the mask. An EWMA never quite reaches zero, so after a
+    // busy stretch it leaves a long tail of small positive values — measured here,
+    // 76% of the "non-zero" points were tail rather than work. Quantiles over that
+    // are meaningless: the line collapses and the peaks tower 12x over it. So the
+    // quantiles are taken only over buckets that actually contained requests,
+    // which is also what the line is supposed to mean: "faster than I usually run
+    // WHILE working".
+    const activity = '{service_name="claude-code"} | event_name = `api_request` '
+      + `| user_email =~ \`${pattern}\``;
+    const [smoothed, active] = await Promise.all([
+      lokiQueryRange(
+        `sum(last_over_time({service_name="claude-code-rate", halflife="${RATE_HALFLIFE}"} `
+        + `| user_email =~ \`${pattern}\` | unwrap ${field} [5m]) by (user_email))`,
+        { hours: 7 * 24, stepSeconds: 300 },
+      ),
+      lokiQueryRange(
+        `sum(count_over_time(${activity} [5m]))`,
+        { hours: 7 * 24, stepSeconds: 300 },
+      ),
+    ]);
+    const busy = new Set((active[0]?.values ?? [])
+      .filter(([, count]) => Number(count) > 0)
+      .map(([ts]) => ts));
+    const values = (smoothed[0]?.values ?? [])
+      .filter(([ts]) => busy.has(ts))
+      .map(([, value]) => Number(value))
       .filter((value) => Number.isFinite(value) && value > 0)
       .sort((a, b) => a - b);
     // Too few samples make the quantile meaningless; the fallback is better.
@@ -292,7 +305,10 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
 
   for (const panel of allPanels(dashboard)) {
     for (const target of panel.targets ?? []) {
-      if (target.expr) target.expr = target.expr.replaceAll('__EXPORTER_STREAM__', EXPORTER_STREAM);
+      if (!target.expr) continue;
+      target.expr = target.expr
+        .replaceAll('__EXPORTER_STREAM__', EXPORTER_STREAM)
+        .replaceAll('__HALFLIFE__', RATE_HALFLIFE);
     }
   }
 
@@ -365,8 +381,8 @@ async function main() {
   for (const email of emails) {
     const [total, input, output, servers, owners] = await Promise.all([
       rateCutlines(email),
-      rateCutlines(email, ['input_tokens']),
-      rateCutlines(email, ['output_tokens']),
+      rateCutlines(email, 'rate_input'),
+      rateCutlines(email, 'rate_output'),
       mcpServers(email),
       skillOwners(email),
     ]);

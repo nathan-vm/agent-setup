@@ -98,7 +98,10 @@ services:
       # Comes from .env, shared with transcript-exporter: this is the stream the
       # panels read from. A mismatch between the two makes the dashboard read an
       # old generation with no visible error.
-      - EXPORTER_STREAM=${EXPORTER_STREAM:?defina EXPORTER_STREAM no .env}
+      - EXPORTER_STREAM=${EXPORTER_STREAM:?set EXPORTER_STREAM in .env}
+      # Same value the exporter uses to build the rate curve: the cutlines are
+      # quantiles of that exact series.
+      - RATE_HALFLIFE=${RATE_HALFLIFE:-20m}
     volumes:
       - ./grafana:/work/grafana
     working_dir: /work
@@ -131,7 +134,10 @@ services:
       # Versioned stream, defined in .env (single source, shared with
       # dashboard-generator). See the comment at the top of exporter.mjs for why
       # the Loki delete API is not used.
-      - EXPORTER_STREAM=${EXPORTER_STREAM:?defina EXPORTER_STREAM no .env}
+      - EXPORTER_STREAM=${EXPORTER_STREAM:?set EXPORTER_STREAM in .env}
+      # Same value the dashboard-generator uses: it computes the rate cutlines
+      # as quantiles of the very curve this service publishes.
+      - RATE_HALFLIFE=${RATE_HALFLIFE:-20m}
     volumes:
       - ./transcript-exporter:/work:ro
       # One config directory per subfolder of /transcripts; the exporter scans the

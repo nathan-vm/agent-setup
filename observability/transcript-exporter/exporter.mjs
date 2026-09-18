@@ -37,6 +37,7 @@ import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { publishUsage } from './usage-meter.mjs';
+import { publishRate } from './rate-meter.mjs';
 import { join, dirname, basename } from 'node:path';
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
@@ -56,6 +57,23 @@ const DEDUP_DAYS = Number(process.env.DEDUP_DAYS || 90);
 const WEEK_START_DAY = Number(process.env.WEEK_START_DAY || 1);
 const WEEK_START_HOUR = Number(process.env.WEEK_START_HOUR || 0);
 const TZ_OFFSET_HOURS = Number(process.env.TZ_OFFSET_HOURS || -3);
+// Smoothing of the consumption-rate panel. 20min was the best trade-off on real
+// data: 1h was so sluggish that 25min after stopping the curve still read 80% of
+// its peak, while the raw boxcar it replaces fell 30x in a single step.
+//
+// ONE variable, in one format, shared with dashboard-generator through .env — it
+// also ends up as a stream label, and the generator needs the identical string to
+// query the series it computes cutlines from.
+const RATE_HALFLIFE = process.env.RATE_HALFLIFE || '20m';
+const RATE_HALFLIFE_S = (() => {
+  const match = /^(\d+)([smh])$/.exec(RATE_HALFLIFE);
+  if (!match) throw new Error(`RATE_HALFLIFE must look like 20m, 90s or 2h (got "${RATE_HALFLIFE}")`);
+  return Number(match[1]) * { s: 1, m: 60, h: 3600 }[match[2]];
+})();
+// How far back the rate series is rebuilt on a first run. Loki here accepts old
+// samples on purpose (reject_old_samples: false), so the panel has history from
+// day one instead of filling in only going forward.
+const RATE_BACKFILL_DAYS = Number(process.env.RATE_BACKFILL_DAYS || 14);
 // Lookback window for resolving a session's account. A stock Loki refuses queries
 // longer than 30d (max_query_length); this stack's loki-config.yaml lifts that
 // cap, but the default here stays safe for a Loki without it.
@@ -92,7 +110,7 @@ const log = (...args) => console.log(new Date().toISOString(), ...args);
 // ---------------------------------------------------------------- estado
 
 const emptyState = () => ({
-  version: 2, files: {}, sessionEmail: {}, seen: {}, otelSkills: {},
+  version: 2, files: {}, sessionEmail: {}, seen: {}, otelSkills: {}, ratePublished: {},
   // sessionId -> [real plugin skill names]. This MUST survive across passes: the
   // transcript line that reveals the real name is read exactly once, but that
   // session's OTel events keep arriving for days. Without persisting it, every
@@ -745,6 +763,20 @@ async function main() {
     }
     // The usage meter does not depend on new transcripts: it measures what OTel
     // already recorded, and must republish even on a pass with nothing to export.
+    try {
+      await publishRate({
+        dryRun: DRY_RUN,
+        lokiUrl: LOKI_URL,
+        halfLifeS: RATE_HALFLIFE_S,
+        halfLifeLabel: RATE_HALFLIFE,
+        backfillDays: RATE_BACKFILL_DAYS,
+        state,
+        log,
+      });
+      if (!DRY_RUN) await saveState(state);
+    } catch (error) {
+      log(`rate meter failed: ${error.message}`);
+    }
     try {
       await publishUsage({
         dryRun: DRY_RUN,
