@@ -431,10 +431,13 @@ white base, then one series per band filtered in LogQL to the samples above
 that band's cutline (`sum(...) > 986651`). A comparison in LogQL drops the
 samples that fail it, so with `spanNulls: false` each overlay renders only the
 stretch that actually crossed, in one flat colour, and the cutline the query
-filters on is the same number the dashed line is drawn at. The overlays carry
-points as well as a line, because a crossing that lasts a single 5-minute
-bucket has no segment to draw; they are hidden from the legend and the tooltip,
-being the same curve recut.
+filters on is the same number the dashed line is drawn at. The overlays are line
+only, with no points of their own -- Grafana already draws a point under the
+cursor on the base curve, which is the only moment one is useful. The cost is
+that a crossing lasting a single 5-minute bucket has no segment to draw and so
+goes uncoloured: 3 of the 27 crossings in a measured week, with the white curve
+still showing the spike. The overlays are hidden from the legend and the
+tooltip, being the same curve recut.
 
 There are three cutlines rather than two because with a single fence the top band
 ran from the fence all the way to the maximum — a 3.3x span on real data, so a
