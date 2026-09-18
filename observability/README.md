@@ -420,13 +420,15 @@ days, as quantiles of the very same smoothed curve the panel draws:
 | Line | What it is | What it means |
 |---|---|---|
 | green | P75 | Above it you are in the busiest quarter of your own normal. |
-| orange | Q3 + 1.5×IQR (Tukey's fence) | Above it is not "busy", it is atypical. Worth looking at what ran there. |
+| red | Q3 + 1.5×IQR (Tukey's fence) | Above it is not "busy", it is atypical. Worth looking at what ran there. |
 
 **The curve itself changes colour with the band it is in**: white below P75 (your
-usual pace), green between the cutlines (working hard), orange above the fence
-(atypical). Measured over 7 days here it reads 97.2% white, 2.0% green, 0.8%
-orange — most of a week is idle or coasting down, and the cutlines are quantiles
-of *working* time, so the colours only light up while you are actually going.
+usual pace), green between the cutlines (working hard), red above the fence
+(atypical). Red rather than orange because with two cutlines this is the top band
+— there is nothing worse for it to escalate into. Measured over 7 days here it
+reads 97.2% white, 2.0% green, 0.8% red — most of a week is idle or coasting down,
+and the cutlines are quantiles of *working* time, so the colours only light up
+while you are actually going.
 
 The input/output panel keeps fixed per-series colours instead (blue and purple),
 because there colour has to tell the two series apart.
