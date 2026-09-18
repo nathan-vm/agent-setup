@@ -424,7 +424,8 @@ days, as quantiles of the very same smoothed curve the panel draws:
 | red | Q3 + 3×IQR (Tukey's outer fence) | The textbook "far out" point. Worth looking at what ran there. |
 
 **The curve itself changes colour with the band it is in**: white below P75 (your
-usual pace), green, orange, red.
+usual pace), green, orange, red. That per-point colouring needs
+`custom.gradientMode: "scheme"` on the panel (see the pitfall below).
 
 There are three cutlines rather than two because with a single fence the top band
 ran from the fence all the way to the maximum — a 3.3x span on real data, so a
@@ -514,6 +515,16 @@ chart), which drew every value below the first cutline as nothing at all. The pa
 looked blank while its tooltip still showed values, and it only surfaced once the
 curve was smoothed: the old spiky one crossed the cutline constantly, so coloured
 fragments stayed visible.
+
+**`gradientMode` decides whether the colour follows the value or the series.**
+`color.mode: thresholds` alone is not enough to paint a line by band. With
+`gradientMode: "opacity"` Grafana resolves the field's colour **once for the whole
+series** — from its display value — and draws every point in it, so the rate curve
+came out uniformly green no matter how many peaks crossed the cutlines. Only
+`gradientMode: "scheme"` evaluates the thresholds **per point along the line**,
+which is what makes a crossing visible. The symptom is easy to misread as "the
+data never crosses": check the numbers first, with the panel's own query.
+
 
 **`allowUiUpdates` must be `false`.** With `true`, the first time a dashboard is
 touched through the UI, Grafana unlinks it from provisioning (`meta.provisioned`
