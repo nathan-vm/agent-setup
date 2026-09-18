@@ -1,0 +1,33 @@
+{
+  "_comentario": [
+    "MODELO. Copie para account-limits.json e ajuste — o arquivo real não é",
+    "versionado porque contém emails (mesma regra do .gitignore para",
+    "grafana/dashboards/accounts/).",
+    "",
+    "Referências de limite por conta, em TOKENS NOVOS (entrada + saída + criação",
+    "de cache). A Anthropic não expõe o limite por telemetria nenhuma, e ele varia",
+    "por plano — por isso é por conta e não um número único.",
+    "",
+    "COMO CALIBRAR: rode /usage na conta, anote a % do bloco de 5h e a da semana,",
+    "e compare com o que o medidor publicou no Loki naquele instante:",
+    "  {service_name=\"claude-code-usage\"} | user_email = `<email>`",
+    "Então limite = tokens_do_medidor / (percentual_do_usage / 100).",
+    "",
+    "Contas sem entrada em 'contas' usam o bloco 'default'.",
+    "'ignorar': contas que não devem gerar dashboard. Serve para conta desativada",
+    "ou de terceiro que ainda aparece nos labels antigos do Prometheus até a",
+    "retenção expirar."
+  ],
+  "default": {
+    "block_5h": 1750000,
+    "week": 21500000
+  },
+  "contas": {
+    "voce@exemplo.com": {
+      "block_5h": 1750000,
+      "week": 21500000,
+      "_calibrado": "AAAA-MM-DD contra /usage = X% (bloco) e Y% (semana)"
+    }
+  },
+  "ignorar": []
+}

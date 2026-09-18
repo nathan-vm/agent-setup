@@ -6,8 +6,14 @@ providers:
     folder: ""
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 30
-    allowUiUpdates: true
+    # 300s: o gerador escreve a cada 10min, entao reler de 30 em 30s era
+    # desperdicio puro - o Grafana reparseia todos os dashboards do disco.
+    updateIntervalSeconds: 300
+    # false de proposito: os dashboards aqui sao gerados a cada 60s a partir do
+    # template. Com true, o Grafana passa a tratar a copia do banco como dona da
+    # verdade e para de aplicar o que muda no arquivo - foi exatamente o que
+    # aconteceu (dashboard servido ficou preso numa versao antiga).
+    allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards
       foldersFromFilesStructure: false

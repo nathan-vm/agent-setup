@@ -1,6 +1,9 @@
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  # 60s e nao 15s: desde que os paineis passaram a ler do Loki, o Prometheus
+  # serve basicamente para listar as contas existentes (label_values). Scrape de
+  # 15s so gastava bateria para um dado que quase nao muda.
+  scrape_interval: 60s
+  evaluation_interval: 60s
 
 scrape_configs:
   - job_name: otel-collector

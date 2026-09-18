@@ -1,0 +1,91 @@
+# Config do Loki deste stack. Parte do local-config.yaml que vem na imagem, com
+# quatro desvios deliberados do padrão — todos por causa do transcript-exporter e
+# da retenção:
+#
+#   1. reject_old_samples: false
+#      O exporter importa o histórico inteiro de transcripts na primeira
+#      execução. O padrão do Loki recusa qualquer amostra com mais de 7 dias, o
+#      que jogaria fora justamente o histórico que se quer importar.
+#
+#   2. max_query_length / max_query_lookback sem teto
+#      O padrão limita consultas a 30 dias. O exporter precisa olhar para trás
+#      para descobrir a conta de sessões antigas, e o dashboard tem painéis de
+#      janela longa.
+#
+#   3. retenção de 90 dias
+#
+#   4. ingester.max_chunk_age alto, para o backfill histórico do exporter não
+#      ser recusado como escrita fora de ordem (ver nota no próprio bloco)
+#      O padrão é guardar para sempre em disco. 90d alinha com a retenção do
+#      Prometheus deste mesmo stack.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+ingester:
+  # O padrão (2h) só aceita escrita fora de ordem dentro de 1h do ponto mais
+  # recente do stream. O transcript-exporter faz backfill de semanas de
+  # histórico, e com o padrão o Loki recusa tudo com HTTP 400 assim que o stream
+  # tem qualquer linha recente. 30 dias de tolerância cobrem a reimportação.
+  max_chunk_age: 720h
+
+limits_config:
+  # Backfill do histórico de transcripts (ver nota 1 no topo).
+  reject_old_samples: false
+  # Sem teto de janela de consulta (ver nota 2).
+  max_query_length: 0s
+  max_query_lookback: 0s
+  # Nome real de ferramenta, request_id, tokens atribuídos — tudo do exporter
+  # entra como structured metadata, não como label de stream.
+  allow_structured_metadata: true
+  # Habilita o endpoint de volume que o Grafana usa nos seletores de label.
+  volume_enabled: true
+  retention_period: 90d
+
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem
+  retention_enabled: true
+  retention_delete_delay: 2h
+  # 10m (padrao). Estava em 1m por causa do experimento com a API de exclusao,
+  # que foi abandonado - compactar de minuto em minuto so acorda a CPU a toa.
+  compaction_interval: 10m
+  # Zero = um pedido de exclusão é executado no próximo ciclo do compactor, em vez
+  # de esperar as 24h padrão de janela para cancelamento.
+  #
+  # Isto NÃO é usado pelo fluxo normal: o transcript-exporter reimporta trocando o
+  # nome do stream (EXPORTER_STREAM no .env), justamente porque a API de exclusão
+  # se mostrou inadequada para substituir dado derivado — ela filtra a janela em
+  # tempo de query e um pedido já processado não pode ser removido, deixando
+  # aquele intervalo cego para sempre naquele stream.
+  #
+  # Fica em 0s para exclusão manual (debug) ter efeito em minutos e não em um dia.
+  # Se você não faz exclusão manual, pode remover esta linha sem impacto.
+  delete_request_cancel_period: 0s
+
+analytics:
+  reporting_enabled: false

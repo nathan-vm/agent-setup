@@ -1,5 +1,11 @@
 name: agents-observability
 
+# Todas as portas sao publicadas em 127.0.0.1 de proposito, e nao no 0.0.0.0 que
+# o Docker usa por padrao. Sem isso, qualquer dispositivo na mesma rede alcanca:
+# o Grafana com acesso anonimo de Viewer (emails, custo, nomes de ferramentas),
+# a API do Loki sem autenticacao nenhuma (inclusive o endpoint de exclusao) e o
+# receptor OTLP, que aceitaria telemetria falsa nos seus dashboards.
+
 services:
   # Single OTLP ingest endpoint. Every Claude Code session sends here.
   otel-collector:
@@ -8,21 +14,26 @@ services:
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
-      - "47317:4317"   # OTLP gRPC  (uncommon host port)
-      - "47318:4318"   # OTLP HTTP  (uncommon host port)
+      - "127.0.0.1:47317:4317"   # OTLP gRPC  (uncommon host port)
+      - "127.0.0.1:47318:4318"   # OTLP HTTP  (uncommon host port)
+    depends_on:
+      - loki
     restart: unless-stopped
 
-  # Log/event store. Prometheus only sees redacted metric labels
-  # (user-configured MCP servers show up as "custom" there by design -
-  # see observability/README.md). The `tool_result` log event carries the
-  # real, unredacted tool_name (e.g. mcp__playwright__browser_navigate),
-  # so local MCP attribution goes through Loki instead of Prometheus.
+  # Log/event store. Guarda duas coisas: os eventos OTel do Claude Code
+  # (api_request, tool_result, ...) e as chamadas de ferramenta que o
+  # transcript-exporter extrai dos transcripts locais.
+  #
+  # Atenção: o Claude Code redige nome de MCP em TODA a telemetria OTel -
+  # "custom" nas métricas do Prometheus e "mcp_tool" no log tool_result. O nome
+  # real só existe nos transcripts, por isso o transcript-exporter existe.
   loki:
     image: grafana/loki:latest
-    command: ["-config.file=/etc/loki/local-config.yaml"]
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
     ports:
-      - "47100:3100"
+      - "127.0.0.1:47100:3100"
     volumes:
+      - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki-data:/loki
     restart: unless-stopped
 
@@ -35,7 +46,7 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "47909:9090"
+      - "127.0.0.1:47909:9090"
     depends_on:
       - otel-collector
     restart: unless-stopped
@@ -49,39 +60,95 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_DEFAULT_THEME=dark
+      # Tudo abaixo e desligar loop de fundo que nao serve a este stack local.
+      # O alerting unificado mantem um agendador rodando mesmo sem nenhuma regra,
+      # e as checagens de versao/analytics fazem HTTP de saida periodico - em
+      # notebook isso e bateria gasta a toa.
+      - GF_UNIFIED_ALERTING_ENABLED=false
+      - GF_ALERTING_ENABLED=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+      - GF_NEWS_NEWS_FEED_ENABLED=false
+      - GF_LOG_LEVEL=warn
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "47300:3000"
+      - "127.0.0.1:47300:3000"
     depends_on:
       - prometheus
       - loki
     restart: unless-stopped
 
-  # OPCIONAL (perfil "autogen"): gera/atualiza um dashboard por conta a cada 60s,
-  # detectando novos user_email automaticamente. Ligue com:
-  #   docker compose --profile autogen up -d
-  # Sem o perfil, gere manualmente no host:
+  # Gera/atualiza um dashboard por conta a cada 10min, detectando novos user_email
+  # sozinho. Era 60s, mas cada ciclo sobe um processo Node e faz varias consultas
+  # de 7 a 30 dias ao Loki - para um dado que muda devagar (P75, lista de
+  # servidores MCP), 10min e de sobra e custa 10x menos. Para rodar na mao: 
   #   node observability/grafana/generate-account-dashboards.mjs
   dashboard-generator:
     image: node:22-alpine
-    profiles: ["autogen"]
     environment:
       - PROM_URL=http://prometheus:9090
+      # Necessario: o gerador consulta o Loki para o P75 por conta e para a
+      # lista de servidores MCP. Sem isso ele degrada para os valores padrao.
+      - LOKI_URL=http://loki:3100
+      # Vem do .env, compartilhado com o transcript-exporter: é o stream de
+      # onde os painéis leem. Um valor diferente entre os dois faz o dashboard
+      # ler uma geração antiga sem nenhum erro aparente.
+      - EXPORTER_STREAM=${EXPORTER_STREAM:?defina EXPORTER_STREAM no .env}
     volumes:
       - ./grafana:/work/grafana
     working_dir: /work
     command:
       - sh
       - -c
-      - "while true; do node /work/grafana/generate-account-dashboards.mjs || echo 'geracao falhou'; sleep 60; done"
+      - "while true; do node /work/grafana/generate-account-dashboards.mjs || echo 'geracao falhou'; sleep 600; done"
     depends_on:
       - prometheus
+      - loki
     restart: unless-stopped
 
+  # Le os transcripts locais do Claude Code e manda para o Loki as chamadas de
+  # ferramenta com o nome REAL (mcp__<servidor>__<tool>), que a telemetria OTel
+  # redige. E a unica fonte possivel para atribuir tokens por servidor MCP.
+  #
+  # Os diretorios de config do Claude Code no host entram como subpastas de
+  # /transcripts, somente-leitura. Sao dois porque e comum ter contas separadas
+  # por contexto (pessoal e trabalho) - ver CLAUDE_DIR_A/B no .env.
+  transcript-exporter:
+    image: node:22-alpine
+    environment:
+      - LOKI_URL=http://loki:3100
+      - TRANSCRIPTS_DIR=/transcripts
+      - STATE_FILE=/state/transcript-exporter-state.json
+      # 120s e nao 30s: cada passada varre centenas de transcripts e consulta o
+      # Loki. Transcript e historico - atrasar 2min nao muda nenhuma decisao, e
+      # acordar 4x menos economiza bateria de forma perceptivel.
+      - POLL_SECONDS=120
+      # Stream versionado, definido no .env (fonte única, compartilhada com o
+      # dashboard-generator). Ver o comentário no topo do exporter.mjs para o
+      # porquê de não usar a API de exclusão do Loki.
+      - EXPORTER_STREAM=${EXPORTER_STREAM:?defina EXPORTER_STREAM no .env}
+    volumes:
+      - ./transcript-exporter:/work:ro
+      # Cada diretório de config entra como uma subpasta de /transcripts; o
+      # exporter varre a raiz recursivamente. Ver CLAUDE_DIR_* no .env.
+      - ${CLAUDE_DIR_A:?defina CLAUDE_DIR_A no .env}/projects:/transcripts/a:ro
+      - ${CLAUDE_DIR_B:?defina CLAUDE_DIR_B no .env}/projects:/transcripts/b:ro
+      - exporter-state:/state
+    working_dir: /work
+    command: ["node", "/work/exporter.mjs"]
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+# ATENCAO: "docker compose down -v" apaga TODOS estes volumes - 90 dias de
+# metricas e logs, mais o estado de deduplicacao do exporter. Irreversivel e sem
+# confirmacao. Para resetar so o exporter, remova apenas exporter-state (ver .env).
 volumes:
   prometheus-data:
   grafana-data:
   loki-data:
+  exporter-state:
