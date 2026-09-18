@@ -1,37 +1,37 @@
 #!/usr/bin/env node
-// Gera os dashboards por conta (user_email) do Claude Code.
+// Generates one Grafana dashboard per Claude Code account (user_email).
 //
-// Fonte única: templates/claude-code.json. Este script NÃO duplica a lógica dos
-// painéis — lê o template em tempo de execução e só troca uid, título e o que é
-// específico da conta. O template fica FORA de dashboards/ de propósito: aquele
-// diretório é o provisionado, e um template lá apareceria como um dashboard a
-// mais, com filtro de conta vazio.
+// Single source: templates/claude-code.json. This script does NOT duplicate the
+// panel logic — it reads the template at runtime and only swaps the uid, the
+// title, and whatever is account-specific. The template lives OUTSIDE
+// dashboards/ on purpose: that directory is the provisioned one, and a template
+// sitting there would show up as one more dashboard with an empty account filter.
 //
-// Por conta ele escreve dois arquivos:
+// Per account it writes one file:
 //   accounts/<slug>.json   "Claude Code — <email>"
 //
-// É um arquivo por conta e nada mais: não existe dashboard "todas as contas",
-// porque cada conta tem MCPs, plugins e configuração próprios e os dados não se
-// somam de forma útil.
+// One file per account and nothing else: there is no "all accounts" dashboard,
+// because each account has its own MCP servers, plugins and configuration, and
+// the numbers do not add up into anything useful.
 //
-// Além de fixar a conta, ele calcula duas coisas que não dá para deixar
-// estáticas no mestre:
-//   - as linhas de corte do painel de ritmo (P75 e cerca de outlier) sobre o
-//     histórico da conta, ignorando períodos parados — o LogQL não calcula
-//     quantil de agregado, então o cálculo mora aqui;
-//   - a lista de servidores MCP que a conta realmente usou, virando as opções
-//     do seletor do dashboard de drill-down.
+// Besides pinning the account, it computes two things that cannot be static in
+// the template:
+//   - the cutlines for the rate panels (P75 and the outlier fence) over the
+//     account's own history, ignoring idle periods — LogQL has no quantile over
+//     an aggregate, so the computation lives here;
+//   - the list of MCP servers and skill owners the account actually used, which
+//     become the options of the dashboard's filters.
 //
-// Uso:
+// Usage:
 //   node observability/grafana/generate-account-dashboards.mjs
 //
-// Variáveis de ambiente:
-//   PROM_URL  URL do Prometheus (padrão http://localhost:47909)
-//   LOKI_URL  URL do Loki       (padrão http://localhost:47100)
+// Environment:
+//   PROM_URL         Prometheus URL (default http://localhost:47909)
+//   LOKI_URL         Loki URL       (default http://localhost:47100)
+//   EXPORTER_STREAM  stream the panels read from (must match transcript-exporter)
 //
-// Os arquivos são carregados pelo provisioning do Grafana
-// (updateIntervalSeconds: 30). Contas que somem dos dados têm os dashboards
-// removidos na execução seguinte.
+// Grafana provisioning picks the files up on its own. Accounts that disappear
+// from the data have their dashboard removed on the next run.
 
 import { readFile, writeFile, mkdir, readdir, unlink, rename } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -39,42 +39,43 @@ import { dirname, join } from 'node:path';
 
 const PROM_URL = process.env.PROM_URL || 'http://localhost:47909';
 const LOKI_URL = process.env.LOKI_URL || 'http://localhost:47100';
-// Precisa bater com o EXPORTER_STREAM do transcript-exporter: é de onde os
-// painéis de MCP e de skill leem. Ver o comentário no topo do exporter.mjs.
+// Must match the transcript-exporter's EXPORTER_STREAM: it is where the MCP and
+// skill panels read from. See the comment at the top of exporter.mjs.
 const EXPORTER_STREAM = process.env.EXPORTER_STREAM || 'claude-code-exporter-1';
 const here = dirname(fileURLToPath(import.meta.url));
-// O template NÃO fica em dashboards/: aquele diretório é o que o Grafana
-// provisiona, e um template lá viraria um dashboard visível com filtro de conta
-// vazio. Só o que este script gera é provisionado.
+// The template does NOT live in dashboards/: that is the directory Grafana
+// provisions, and a template there would become a visible dashboard with an
+// empty account filter. Only what this script generates is provisioned.
 const templatePath = join(here, 'templates', 'claude-code.json');
 const limitsPath = join(here, 'account-limits.json');
 const outDir = join(here, 'dashboards', 'accounts');
-// Janela em que o ritmo é medido. TEM que ser a mesma do template, senão as
-// linhas de corte são calculadas sobre uma distribuição diferente da que o
-// gráfico desenha — um pico de 5min tem taxa horária muito maior do que a mesma
-// atividade diluída em 1h, e a linha fica baixa demais.
+
+// Window the rate is measured over. It MUST match the template, otherwise the
+// cutlines are computed over a different distribution than the graph draws — a
+// 5min burst has a far higher hourly rate than the same activity spread over 1h,
+// and the line ends up far too low.
 const RATE_WINDOW = '15m';
 const RATE_TO_HOUR = 4;
-// Usados quando a conta ainda não tem histórico suficiente para estatística própria.
+// Used when an account has too little history for statistics of its own.
 const CUTLINE_FALLBACK = { p75: 766_008, outlier: 1_721_058 };
 
 function slug(email) {
   return email.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-// O valor entra numa expressão LogQL como `user_email =~ \`<valor>\``, então os
-// metacaracteres do email (o ponto, principalmente) precisam ser literais.
+// The value goes into a LogQL expression as `user_email =~ \`<value>\``, so the
+// email's metacharacters (the dot, mostly) have to stay literal.
 function escapeRegex(value) {
-  // O backtick entra junto: os valores são interpolados dentro de `...` no
-  // LogQL, e um backtick no meio fecharia a string, fazendo o resto do valor
-  // virar sintaxe.
+  // The backtick is in the set too: values are interpolated inside `...` in
+  // LogQL, and a backtick in the middle would close the string, turning the rest
+  // of the value into syntax.
   return value.replace(/[.+*?()|[\]{}\\^$`]/g, '\\$&');
 }
 
 async function promLabelValues(label) {
   const url = new URL(`/api/v1/label/${label}/values`, PROM_URL);
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Prometheus respondeu ${response.status} em ${url}`);
+  if (!response.ok) throw new Error(`Prometheus answered ${response.status} at ${url}`);
   const body = await response.json();
   if (body.status !== 'success') throw new Error(`Prometheus status=${body.status}`);
   return [...new Set((body.data || []).filter(Boolean))].sort();
@@ -103,70 +104,69 @@ function quantile(sorted, q) {
   return sorted[low] + (sorted[high] - sorted[low]) * (position - low);
 }
 
-// Linhas de corte do painel de ritmo, sobre o histórico de 7 dias da conta:
+// Cutlines for the rate panels, over the account's last 7 days:
 //
-//   p75      — acima dela, a conta está no quarto mais intenso do próprio normal.
-//   outlier  — cerca superior de Tukey (Q3 + 1,5×IQR). Acima dela não é "intenso",
-//              é atípico.
+//   p75      — above it, the account is in the busiest quarter of its own normal.
+//   outlier  — Tukey's upper fence (Q3 + 1.5×IQR). Above it is not "busy", it is
+//              atypical.
 //
-// Períodos parados são descartados: incluir zeros puxaria os quantis para baixo e
-// a linha passaria a dizer apenas "está usando", não "está usando muito".
+// Idle periods are dropped: including zeros would pull the quantiles down and the
+// line would only mean "is using", not "is using a lot".
 //
-// Quantil de agregado não existe em LogQL (dá para tirar quantil dos valores
-// individuais, não dos baldes que o gráfico desenha), por isso o cálculo é aqui.
+// LogQL has no quantile over an aggregate (you can take a quantile of individual
+// values, not of the buckets the graph draws), which is why this lives here.
 async function rateCutlines(email, fields = ['input_tokens', 'output_tokens', 'cache_creation_tokens']) {
   const selector = '{service_name="claude-code"} | event_name = `api_request` '
     + `| user_email =~ \`${escapeRegex(email)}\``;
   try {
-    // Um scan por campo, somados aqui. Antes o "total" pedia ao Loki uma quarta
-    // expressão que reescaneava entrada e saída — já trazidas pelas chamadas
-    // individuais — a cada ciclo, para sempre. Somar no JS também evita o caso
-    // em que um campo sem amostra esvazia a soma inteira no LogQL.
-    // stepSeconds = a janela: amostras de 15min colhidas de 5 em 5min se
-    // sobrepõem e enviesam o quantil.
+    // One scan per field, summed here. The "total" used to ask Loki for a fourth
+    // expression that re-scanned input and output — already fetched by the
+    // individual calls — every cycle, forever. Summing in JS also avoids the case
+    // where a field with no samples empties the whole sum in LogQL.
+    // stepSeconds = the window: 15min samples taken every 5min overlap and skew
+    // the quantile.
     const series = await Promise.all(fields.map((field) => lokiQueryRange(
       `sum(sum_over_time(${selector} | unwrap ${field} [${RATE_WINDOW}]))`,
       { hours: 7 * 24, stepSeconds: 900 },
     )));
-    const porInstante = new Map();
+    const byInstant = new Map();
     for (const result of series) {
       for (const [ts, value] of result[0]?.values ?? []) {
-        porInstante.set(ts, (porInstante.get(ts) ?? 0) + Number(value));
+        byInstant.set(ts, (byInstant.get(ts) ?? 0) + Number(value));
       }
     }
-    const values = [...porInstante.values()]
+    const values = [...byInstant.values()]
       .map((value) => value * RATE_TO_HOUR)
       .filter((value) => Number.isFinite(value) && value > 0)
       .sort((a, b) => a - b);
-    // Poucas amostras dão quantil sem significado; melhor o fallback.
+    // Too few samples make the quantile meaningless; the fallback is better.
     if (values.length < 20) return { ...CUTLINE_FALLBACK, fallback: true };
     const q1 = quantile(values, 0.25);
     const q3 = quantile(values, 0.75);
     return { p75: Math.round(q3), outlier: Math.round(q3 + 1.5 * (q3 - q1)) };
   } catch (error) {
-    console.error(`linhas de corte de ${email} indisponíveis (${error.message}); usando o padrão`);
+    console.error(`cutlines for ${email} unavailable (${error.message}); using defaults`);
     return { ...CUTLINE_FALLBACK, fallback: true };
   }
 }
 
-// Donos de skill vistos na conta. "Dono" é o plugin que traz a skill: em
-// "superpowers:brainstorming" o dono é "superpowers"; skill sem prefixo é local
-// do projeto ou do usuário. O valor da opção é um REGEX, porque é assim que o
-// painel filtra — assim não precisa de nenhum label novo no dado.
+// Skill owners seen on the account. The "owner" is the plugin a skill comes from:
+// in "superpowers:brainstorming" the owner is "superpowers"; a skill with no
+// prefix is local to the project or the user.
 async function skillOwners(email) {
   const expr = `sum by (skill_owner) (count_over_time({service_name="${EXPORTER_STREAM}", kind="skills"} `
     + `| user_email =~ \`${escapeRegex(email)}\` [1h]))`;
   try {
     const result = await lokiQueryRange(expr, { hours: 30 * 24, stepSeconds: 3600 });
-    // Valores são nomes simples (o campo skill_owner do exporter), nunca regex
-    // com ":" dentro — ver o comentário em rebuildSkillRecords no exporter.
-    const donos = [...new Set(result.map((series) => series.metric?.skill_owner).filter(Boolean))].sort();
-    return donos.map((dono) => ({
-      text: dono === 'local' ? 'locais (sem plugin)' : dono,
-      value: escapeRegex(dono),
+    // Values are plain names (the exporter's skill_owner field), never a regex
+    // with ":" inside — see the comment in rebuildSkillRecords in the exporter.
+    const owners = [...new Set(result.map((series) => series.metric?.skill_owner).filter(Boolean))].sort();
+    return owners.map((owner) => ({
+      text: owner === 'local' ? 'local (no plugin)' : owner,
+      value: escapeRegex(owner),
     }));
   } catch (error) {
-    console.error(`donos de skill de ${email} indisponíveis (${error.message})`);
+    console.error(`skill owners for ${email} unavailable (${error.message})`);
     return [];
   }
 }
@@ -178,18 +178,19 @@ async function mcpServers(email) {
     const result = await lokiQueryRange(expr, { hours: 30 * 24, stepSeconds: 3600 });
     return [...new Set(result.map((series) => series.metric?.mcp_server).filter(Boolean))].sort();
   } catch (error) {
-    console.error(`servidores MCP de ${email} indisponíveis (${error.message})`);
+    console.error(`MCP servers for ${email} unavailable (${error.message})`);
     return [];
   }
 }
 
-// Um dashboard por conta, e só. Cada conta tem MCPs, plugins e configuração
-// próprios; um dashboard agregando todas mistura dados que não se somam.
+// One dashboard per account, and that is it. Each account has its own MCP
+// servers, plugins and configuration; a dashboard aggregating all of them mixes
+// numbers that do not add up.
 function accountVariable(email) {
   const escaped = escapeRegex(email);
   return {
     name: 'account',
-    label: 'Conta',
+    label: 'Account',
     type: 'constant',
     query: escaped,
     current: { text: email, value: escaped },
@@ -197,31 +198,31 @@ function accountVariable(email) {
   };
 }
 
-// O limite da Anthropic varia por plano, então é por conta. Ver os comentários
-// dentro de account-limits.json para o procedimento de calibração.
+// Anthropic's limit varies by plan, so it is per account. See the comments
+// inside account-limits.json for the calibration procedure.
 async function loadLimits() {
   try {
     return JSON.parse(await readFile(limitsPath, 'utf8'));
   } catch (error) {
-    // Ausente é normal na primeira execução. QUALQUER outro erro (JSON com
-    // vírgula sobrando, permissão) tem que abortar: tratar como "{}" reverteria
-    // em silêncio a lista de contas ignoradas e os limites calibrados, e as
-    // gauges passariam a mostrar percentuais errados sem nenhum aviso.
+    // Missing is normal on a first run. ANY other error (a trailing comma in the
+    // JSON, a permission problem) has to abort: treating it as "{}" would
+    // silently revert the ignore list and the calibrated limits, and the gauges
+    // would start showing wrong percentages with no warning at all.
     if (error.code === 'ENOENT') return {};
-    throw new Error(`account-limits.json ilegível (${error.message}). `
-      + 'Corrija o arquivo: seguir sem ele reverteria limites e lista de ignorados.');
+    throw new Error(`account-limits.json unreadable (${error.message}). `
+      + 'Fix the file: carrying on without it would revert limits and the ignore list.');
   }
 }
 
 function limitsFor(limits, email) {
   const fallback = { block_5h: 1_750_000, week: 21_500_000 };
-  return { ...fallback, ...(limits.default ?? {}), ...(limits.contas?.[email] ?? {}) };
+  return { ...fallback, ...(limits.default ?? {}), ...(limits.accounts?.[email] ?? {}) };
 }
 
-// Percorre TODOS os painéis, inclusive os que ficam dentro de uma seção
-// fechada — esses moram em row.panels, não na lista de topo. Esquecer disso faz
-// um painel inteiro parar de funcionar em silêncio: o placeholder do stream não
-// era substituído e a query ia para o Loki com "__EXPORTER_STREAM__" literal.
+// Walks EVERY panel, including the ones inside a collapsed row — those live in
+// row.panels, not in the top-level list. Forgetting that makes a whole panel stop
+// working in silence: the stream placeholder went unreplaced and the query
+// reached Loki with a literal "__EXPORTER_STREAM__" in it.
 function allPanels(node) {
   const out = [];
   for (const panel of node.panels ?? []) {
@@ -230,17 +231,17 @@ function allPanels(node) {
   return out;
 }
 
-// Rede de segurança para a classe de bug acima: se QUALQUER placeholder
-// sobreviver, é melhor falhar alto do que escrever um dashboard com um painel
-// que consulta o Loki por um nome de stream inexistente e mostra "No data".
-function conferirPlaceholders(dashboard) {
-  const restantes = allPanels(dashboard).flatMap((panel) =>
+// Safety net for the bug class above: if ANY placeholder survives, failing loudly
+// beats writing a dashboard whose panel queries Loki for a stream name that does
+// not exist and shows "No data".
+function assertNoPlaceholders(dashboard) {
+  const left = allPanels(dashboard).flatMap((panel) =>
     (panel.targets ?? [])
       .filter((target) => /__[A-Z_]+__/.test(target.expr ?? ''))
       .map((target) => `${panel.id}:${target.refId}`));
-  if (restantes.length) {
-    throw new Error(`placeholder não substituído em ${restantes.join(', ')} `
-      + `(dashboard ${dashboard.uid}) — painel ficaria sem dados`);
+  if (left.length) {
+    throw new Error(`unreplaced placeholder in ${left.join(', ')} `
+      + `(dashboard ${dashboard.uid}) — that panel would show no data`);
   }
 }
 
@@ -251,9 +252,9 @@ function replaceVariable(dashboard, variable) {
   else list.unshift(variable);
 }
 
-// Injeta as linhas de corte nos painéis de ritmo que as desenham. O primeiro
-// degrau é o base (transparente) e fica intacto; painéis sem linha de corte têm
-// só esse degrau e são ignorados.
+// Injects the cutlines into the rate panels that draw them. The first step is the
+// transparent base and stays untouched; panels without cutlines only have that
+// step and are skipped.
 function applyCutlines(dashboard, byName) {
   const write = (steps, cutlines) => {
     if (!Array.isArray(steps) || steps.length < 3 || !cutlines) return;
@@ -262,13 +263,13 @@ function applyCutlines(dashboard, byName) {
   };
   for (const panel of allPanels(dashboard)) {
     if (panel.type !== 'timeseries') continue;
-    // Painel do total: linhas em defaults.
+    // Total panel: cutlines live in defaults.
     write(panel.fieldConfig?.defaults?.thresholds?.steps, byName.total);
-    // Painel de entrada/saída: cada série tem as suas, num override.
+    // Input/output panel: each series has its own, in an override.
     for (const override of panel.fieldConfig?.overrides ?? []) {
-      const serie = override.matcher?.options;
+      const series = override.matcher?.options;
       const property = (override.properties ?? []).find((item) => item.id === 'thresholds');
-      if (property) write(property.value?.steps, byName[serie]);
+      if (property) write(property.value?.steps, byName[series]);
     }
   }
 }
@@ -278,10 +279,14 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
   dashboard.uid = `cc-${slug(email)}`.slice(0, 40);
   dashboard.title = `Claude Code — ${email}`;
   dashboard.description =
-    `Conta ${email}. Gerado a partir de templates/claude-code.json — não edite à mão, `
-    + `rode generate-account-dashboards.mjs. Linhas de corte do ritmo, sobre os `
-    + `últimos 7 dias desta conta: P75 ${cutlines.total.p75.toLocaleString('pt-BR')} e `
-    + `outlier ${cutlines.total.outlier.toLocaleString('pt-BR')} tokens/h.`;
+    `Account ${email}. Generated from templates/claude-code.json — do not edit by `
+    + `hand, run generate-account-dashboards.mjs. `
+    + (cutlines.total.fallback
+      ? 'Rate cutlines: DEFAULT values (not enough history, or Loki unavailable), '
+        + 'not computed from this account.'
+      : `Rate cutlines, over this account's last 7 days: P75 `
+        + `${cutlines.total.p75.toLocaleString('en-US')} and outlier `
+        + `${cutlines.total.outlier.toLocaleString('en-US')} tokens/h.`);
   replaceVariable(dashboard, accountVariable(email));
   applyCutlines(dashboard, cutlines);
 
@@ -299,8 +304,8 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
     });
   }
 
-  // O link do painel de servidores aponta para o próprio dashboard da conta.
-  // Ele vive num override (só na coluna do nome), não em defaults.
+  // The server panel's link points at the account's own dashboard. It lives in an
+  // override (only on the name column), not in defaults.
   for (const panel of allPanels(dashboard)) {
     const linkLists = [
       panel.fieldConfig?.defaults?.links,
@@ -318,89 +323,89 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
     }
   }
 
-  // Filtros com "Todos" na frente e sempre selecionado por padrão: abrir o
-  // dashboard tem que mostrar tudo, não um item arbitrário.
-  const filtro = (name, label, options) => {
-    const todas = [{ text: 'Todos', value: '.*' }, ...options];
+  // Filters with "All" first and always selected by default: opening the
+  // dashboard has to show everything, not some arbitrary item.
+  const filter = (name, label, options) => {
+    const all = [{ text: 'All', value: '.*' }, ...options];
     return {
       name,
       label,
       type: 'custom',
-      query: todas.map((option) => `${option.text} : ${option.value}`).join(','),
-      options: todas.map((option, index) => ({ ...option, selected: index === 0 })),
-      current: { ...todas[0] },
+      query: all.map((option) => `${option.text} : ${option.value}`).join(','),
+      options: all.map((option, index) => ({ ...option, selected: index === 0 })),
+      current: { ...all[0] },
       includeAll: false,
       multi: false,
       hide: 0,
     };
   };
-  replaceVariable(dashboard, filtro('server', 'Servidor MCP',
+  replaceVariable(dashboard, filter('server', 'MCP server',
     servers.map((server) => ({ text: server, value: escapeRegex(server) }))));
-  replaceVariable(dashboard, filtro('owner', 'Dono da skill', owners));
-  conferirPlaceholders(dashboard);
+  replaceVariable(dashboard, filter('owner', 'Skill owner', owners));
+  assertNoPlaceholders(dashboard);
   return dashboard;
 }
 
 async function main() {
   const template = JSON.parse(await readFile(templatePath, 'utf8'));
   const limits = await loadLimits();
-  // Contas na lista de ignorados não geram dashboard. Um email só some dos
-  // labels do Prometheus quando a retenção expira, então sem isso uma conta
-  // desativada continuaria aparecendo com todos os painéis vazios.
-  const ignorar = new Set(limits.ignorar ?? []);
-  const todosEmails = await promLabelValues('user_email');
-  const emails = todosEmails.filter((email) => {
-    if (!ignorar.has(email)) return true;
-    console.log(`ignorado: ${email} (lista 'ignorar' em account-limits.json)`);
+  // Accounts on the ignore list get no dashboard. An email only leaves the
+  // Prometheus labels when retention expires, so without this a deactivated
+  // account would keep showing up with every panel empty.
+  const ignore = new Set(limits.ignore ?? []);
+  const allEmails = await promLabelValues('user_email');
+  const emails = allEmails.filter((email) => {
+    if (!ignore.has(email)) return true;
+    console.log(`ignored: ${email} ('ignore' list in account-limits.json)`);
     return false;
   });
   await mkdir(outDir, { recursive: true });
 
   const wanted = new Map();
   for (const email of emails) {
-    const [total, entrada, saida, servers, owners] = await Promise.all([
+    const [total, input, output, servers, owners] = await Promise.all([
       rateCutlines(email),
       rateCutlines(email, ['input_tokens']),
       rateCutlines(email, ['output_tokens']),
       mcpServers(email),
       skillOwners(email),
     ]);
-    const cutlines = { total, entrada, 'saída': saida };
+    const cutlines = { total, input, output };
     const accountLimits = limitsFor(limits, email);
     wanted.set(`${slug(email)}.json`, scopeAccount(template, email, cutlines, servers, owners, accountLimits));
     console.log(
-      `${email}  ->  corte total P75 ${total.p75.toLocaleString('pt-BR')}`
-      + ` / outlier ${total.outlier.toLocaleString('pt-BR')} tokens/h`
-      + `, ${servers.length} servidor(es) MCP, ${owners.length} dono(s) de skill`
-      + `, limites ${accountLimits.block_5h.toLocaleString('pt-BR')}/5h `
-      + `e ${accountLimits.week.toLocaleString('pt-BR')}/semana`,
+      `${email}  ->  total cutlines P75 ${total.p75.toLocaleString('en-US')}`
+      + ` / outlier ${total.outlier.toLocaleString('en-US')} tokens/h`
+      + `, ${servers.length} MCP server(s), ${owners.length} skill owner(s)`
+      + `, limits ${accountLimits.block_5h.toLocaleString('en-US')}/5h `
+      + `and ${accountLimits.week.toLocaleString('en-US')}/week`,
     );
   }
 
-  // Remove dashboards de contas que não têm mais dados.
+  // Drop dashboards of accounts that no longer have data.
   const existing = (await readdir(outDir).catch(() => [])).filter((file) => file.endsWith('.json'));
   for (const file of existing) {
     if (!wanted.has(file)) {
       await unlink(join(outDir, file));
-      console.log(`removido: ${file} (conta sem dados)`);
+      console.log(`removed: ${file} (account has no data)`);
     }
   }
 
   for (const [file, dashboard] of wanted) {
-    // Escreve e renomeia: o Grafana relê este diretório por conta própria e
-    // poderia pegar um JSON truncado no meio da escrita.
-    const destino = join(outDir, file);
-    const tmp = `${destino}.tmp-${process.pid}`;
+    // Write then rename: Grafana re-reads this directory on its own and could
+    // otherwise pick up a JSON truncated mid-write.
+    const target = join(outDir, file);
+    const tmp = `${target}.tmp-${process.pid}`;
     await writeFile(tmp, `${JSON.stringify(dashboard, null, 2)}\n`);
-    await rename(tmp, destino);
+    await rename(tmp, target);
     console.log(`  ${dashboard.uid}  ->  ${file}`);
   }
 
-  console.log(`${wanted.size} dashboard(s), um por conta, em ${outDir}`);
+  console.log(`${wanted.size} dashboard(s), one per account, in ${outDir}`);
   if (emails.length === 0) {
-    console.log(todosEmails.length
-      ? `Nenhum dashboard gerado: as ${todosEmails.length} conta(s) com dados estão na lista 'ignorar'.`
-      : 'Nenhuma conta ainda — rode uma sessão Claude e tente de novo.');
+    console.log(allEmails.length
+      ? `No dashboard generated: all ${allEmails.length} account(s) with data are on the 'ignore' list.`
+      : 'No account yet — run a Claude session and try again.');
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "uid": "claude-code",
   "title": "Claude Code",
-  "description": "Template. O gerador escreve um dashboard por conta a partir daqui — não provisione este arquivo direto.",
+  "description": "Template. The generator writes one dashboard per account from this file — do not provision it directly.",
   "tags": [
     "claude-code"
   ],
@@ -18,32 +18,32 @@
   "timepicker": {
     "quick_ranges": [
       {
-        "display": "Semana corrente (a partir de 2ª, 9h)",
+        "display": "Current week (from Mon 9am)",
         "from": "now/w+9h+24h",
         "to": "now"
       },
       {
-        "display": "Dia corrente (a partir das 9h)",
+        "display": "Current day (from 9am)",
         "from": "now/d+9h",
         "to": "now"
       },
       {
-        "display": "Últimas 5 horas",
+        "display": "Last 5 hours",
         "from": "now-5h",
         "to": "now"
       },
       {
-        "display": "Últimas 24 horas",
+        "display": "Last 24 hours",
         "from": "now-24h",
         "to": "now"
       },
       {
-        "display": "Últimos 7 dias",
+        "display": "Last 7 days",
         "from": "now-7d",
         "to": "now"
       },
       {
-        "display": "Últimos 30 dias",
+        "display": "Last 30 days",
         "from": "now-30d",
         "to": "now"
       }
@@ -53,7 +53,7 @@
     "list": [
       {
         "name": "account",
-        "label": "Conta",
+        "label": "Account",
         "type": "constant",
         "query": ".*",
         "current": {
@@ -64,18 +64,18 @@
       },
       {
         "name": "server",
-        "label": "Servidor MCP",
+        "label": "MCP server",
         "type": "custom",
         "query": ".*",
         "options": [
           {
-            "text": "Todos",
+            "text": "All",
             "value": ".*",
             "selected": true
           }
         ],
         "current": {
-          "text": "Todos",
+          "text": "All",
           "value": ".*"
         },
         "includeAll": false,
@@ -84,18 +84,18 @@
       },
       {
         "name": "owner",
-        "label": "Dono da skill",
+        "label": "Skill owner",
         "type": "custom",
         "query": ".*",
         "options": [
           {
-            "text": "Todos",
+            "text": "All",
             "value": ".*",
             "selected": true
           }
         ],
         "current": {
-          "text": "Todos",
+          "text": "All",
           "value": ".*"
         },
         "includeAll": false,
@@ -104,7 +104,7 @@
       },
       {
         "name": "limit_tokens_5h",
-        "label": "Referência de tokens (bloco 5h)",
+        "label": "Token reference (5h block)",
         "type": "textbox",
         "query": "1750000",
         "current": {
@@ -115,7 +115,7 @@
       },
       {
         "name": "limit_tokens_week",
-        "label": "Referência de tokens (semana)",
+        "label": "Token reference (week)",
         "type": "textbox",
         "query": "21500000",
         "current": {
@@ -129,7 +129,7 @@
   "panels": [
     {
       "type": "row",
-      "title": "VISÃO GERAL",
+      "title": "OVERVIEW",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -142,7 +142,7 @@
     {
       "id": 1,
       "type": "gauge",
-      "title": "Limite do bloco de 5h — % usado",
+      "title": "5h block limit — % used",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -164,7 +164,7 @@
           "expr": "(vector(100) < (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap block_tokens [30m]) by (user_email)) / $limit_tokens_5h)) or (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap block_tokens [30m]) by (user_email)) / $limit_tokens_5h)",
           "queryType": "range",
           "hide": false,
-          "legendFormat": "usado"
+          "legendFormat": "used"
         }
       ],
       "fieldConfig": {
@@ -215,7 +215,7 @@
     {
       "id": 2,
       "type": "gauge",
-      "title": "Limite semanal — % usado",
+      "title": "Weekly limit — % used",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -237,7 +237,7 @@
           "expr": "(vector(100) < (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap week_tokens [30m]) by (user_email)) / $limit_tokens_week)) or (100 * sum(last_over_time({service_name=\"claude-code-usage\"} | user_email =~ `$account` | unwrap week_tokens [30m]) by (user_email)) / $limit_tokens_week)",
           "queryType": "range",
           "hide": false,
-          "legendFormat": "usado"
+          "legendFormat": "used"
         }
       ],
       "fieldConfig": {
@@ -288,7 +288,7 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Cache reutilizado",
+      "title": "Cache reuse",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -351,7 +351,7 @@
     {
       "id": 4,
       "type": "piechart",
-      "title": "Tokens por modelo",
+      "title": "Tokens by model",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -422,13 +422,13 @@
     },
     {
       "type": "row",
-      "title": "DETALHAMENTO SEMANAL",
+      "title": "WEEKLY BREAKDOWN",
       "collapsed": true,
       "panels": [
         {
           "id": 10,
           "type": "table",
-          "title": "Detalhamento semanal",
+          "title": "Weekly breakdown",
           "datasource": {
             "type": "loki",
             "uid": "loki"
@@ -478,7 +478,7 @@
               {
                 "matcher": {
                   "id": "byName",
-                  "options": "% do limite semanal"
+                  "options": "% of weekly limit"
                 },
                 "properties": [
                   {
@@ -505,14 +505,14 @@
                 "sum"
               ],
               "fields": [
-                "% do limite semanal"
+                "% of weekly limit"
               ],
               "countRows": false,
               "enablePagination": false
             },
             "sortBy": [
               {
-                "displayName": "% do limite semanal",
+                "displayName": "% of weekly limit",
                 "desc": true
               }
             ]
@@ -542,11 +542,11 @@
                 },
                 "renameByName": {
                   "skill_name": "Skill",
-                  "model": "Modelo",
+                  "model": "Model",
                   "effort": "Effort",
-                  "query_source": "Origem",
-                  "Value": "% do limite semanal",
-                  "Value #A": "% do limite semanal"
+                  "query_source": "Source",
+                  "Value": "% of weekly limit",
+                  "Value #A": "% of weekly limit"
                 }
               }
             }
@@ -562,7 +562,7 @@
     },
     {
       "type": "row",
-      "title": "SKILLS E FERRAMENTAS",
+      "title": "SKILLS AND TOOLS",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -575,7 +575,7 @@
     {
       "id": 5,
       "type": "table",
-      "title": "Tokens por skill",
+      "title": "Tokens by skill",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -687,7 +687,7 @@
     {
       "id": 6,
       "type": "table",
-      "title": "Tokens por servidor MCP",
+      "title": "Tokens by MCP server",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -738,7 +738,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Servidor"
+              "options": "Server"
             },
             "properties": [
               {
@@ -805,7 +805,7 @@
           "options": {
             "excludeByName": {},
             "renameByName": {
-              "Field": "Servidor",
+              "Field": "Server",
               "Last": "Tokens",
               "Last *": "Tokens"
             }
@@ -816,7 +816,7 @@
     {
       "id": 7,
       "type": "piechart",
-      "title": "Tokens por origem",
+      "title": "Tokens by source",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -910,13 +910,13 @@
     },
     {
       "type": "row",
-      "title": "FERRAMENTAS MCP — DETALHE POR FERRAMENTA",
+      "title": "MCP TOOLS — PER-TOOL BREAKDOWN",
       "collapsed": true,
       "panels": [
         {
           "id": 11,
           "type": "table",
-          "title": "Tokens por ferramenta MCP",
+          "title": "Tokens by MCP tool",
           "datasource": {
             "type": "loki",
             "uid": "loki"
@@ -1017,7 +1017,7 @@
               "options": {
                 "excludeByName": {},
                 "renameByName": {
-                  "Field": "Servidor · Ferramenta",
+                  "Field": "Server · Tool",
                   "Last": "Tokens",
                   "Last *": "Tokens"
                 }
@@ -1035,7 +1035,7 @@
     },
     {
       "type": "row",
-      "title": "RITMO DE CONSUMO",
+      "title": "CONSUMPTION RATE",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -1048,7 +1048,7 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Ritmo de consumo (tokens / hora)",
+      "title": "Consumption rate (tokens / hour)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -1070,7 +1070,7 @@
           "expr": "((sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap input_tokens [15m])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap output_tokens [15m])) + sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap cache_creation_tokens [15m]))) or vector(0)) * 4",
           "queryType": "range",
           "hide": false,
-          "legendFormat": "tokens/hora"
+          "legendFormat": "tokens/hour"
         }
       ],
       "fieldConfig": {
@@ -1143,7 +1143,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Ritmo por tipo — entrada e saída",
+      "title": "Rate by type — input and output",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -1165,7 +1165,7 @@
           "expr": "(sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap input_tokens [15m])) or vector(0)) * 4",
           "queryType": "range",
           "hide": false,
-          "legendFormat": "entrada"
+          "legendFormat": "input"
         },
         {
           "refId": "B",
@@ -1177,7 +1177,7 @@
           "expr": "(sum(sum_over_time({service_name=\"claude-code\"} | event_name = `api_request` | user_email =~ `$account` | unwrap output_tokens [15m])) or vector(0)) * 4",
           "queryType": "range",
           "hide": false,
-          "legendFormat": "saída"
+          "legendFormat": "output"
         }
       ],
       "fieldConfig": {
@@ -1224,7 +1224,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "entrada"
+              "options": "input"
             },
             "properties": [
               {
@@ -1265,7 +1265,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "saída"
+              "options": "output"
             },
             "properties": [
               {

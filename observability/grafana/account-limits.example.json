@@ -1,33 +1,34 @@
 {
-  "_comentario": [
-    "MODELO. Copie para account-limits.json e ajuste — o arquivo real não é",
-    "versionado porque contém emails (mesma regra do .gitignore para",
-    "grafana/dashboards/accounts/).",
+  "_comment": [
+    "TEMPLATE. Copy to account-limits.json and adjust — the real file is not",
+    "versioned because it contains email addresses (same rule as the .gitignore",
+    "entry for grafana/dashboards/accounts/).",
     "",
-    "Referências de limite por conta, em TOKENS NOVOS (entrada + saída + criação",
-    "de cache). A Anthropic não expõe o limite por telemetria nenhuma, e ele varia",
-    "por plano — por isso é por conta e não um número único.",
+    "Limit references per account, in NEW TOKENS (input + output + cache creation).",
+    "Anthropic does not expose the limit through any telemetry, and it varies by",
+    "plan — hence per account rather than a single number.",
     "",
-    "COMO CALIBRAR: rode /usage na conta, anote a % do bloco de 5h e a da semana,",
-    "e compare com o que o medidor publicou no Loki naquele instante:",
+    "HOW TO CALIBRATE: run /usage on the account, note the 5h-block and weekly",
+    "percentages, and compare them with what the meter published to Loki at that",
+    "moment:",
     "  {service_name=\"claude-code-usage\"} | user_email = `<email>`",
-    "Então limite = tokens_do_medidor / (percentual_do_usage / 100).",
+    "Then limit = meter_tokens / (usage_percentage / 100).",
     "",
-    "Contas sem entrada em 'contas' usam o bloco 'default'.",
-    "'ignorar': contas que não devem gerar dashboard. Serve para conta desativada",
-    "ou de terceiro que ainda aparece nos labels antigos do Prometheus até a",
-    "retenção expirar."
+    "Accounts with no entry under 'contas' fall back to the 'default' block.",
+    "'ignorar': accounts that should not get a dashboard. Useful for a deactivated",
+    "or third-party account that still shows up in old Prometheus labels until",
+    "retention expires."
   ],
   "default": {
     "block_5h": 1750000,
     "week": 21500000
   },
-  "contas": {
-    "voce@exemplo.com": {
+  "accounts": {
+    "you@example.com": {
       "block_5h": 1750000,
       "week": 21500000,
-      "_calibrado": "AAAA-MM-DD contra /usage = X% (bloco) e Y% (semana)"
+      "_calibrado": "YYYY-MM-DD against /usage = X% (block) and Y% (week)"
     }
   },
-  "ignorar": []
+  "ignore": []
 }

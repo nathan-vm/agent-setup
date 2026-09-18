@@ -1,49 +1,50 @@
 # Agents Observability
 
-Stack local para acompanhar **sessões de CLI de coding assistant** — quanto cada
-sessão consome do limite e como ela é usada. Hoje ingere Claude Code; outras
-ferramentas entram depois pelos próprios adaptadores.
+Local stack for tracking **coding-assistant CLI sessions** — how much of your
+limit each session burns and how it is used. Today it ingests Claude Code; other
+tools plug in later through their own adapters.
 
-Caminho: Claude Code → OTel Collector → Prometheus (métricas) + Loki (logs) →
-Grafana. Em paralelo, o **transcript-exporter** lê os transcripts locais e
-publica no Loki duas coisas que a telemetria OTel não dá: os nomes reais de
-ferramentas MCP e o consumo nas janelas de limite reais.
+Path: Claude Code → OTel Collector → Prometheus (metrics) + Loki (logs) →
+Grafana. In parallel, the **transcript-exporter** reads the local transcripts and
+publishes into Loki two things the OTel telemetry does not give you: the real MCP
+and skill names, and consumption measured over the real limit windows.
 
-## Serviços
+## Services
 
-| Serviço             | URL / porta                                        | Papel |
-|---------------------|----------------------------------------------------|-------|
-| OTel Collector      | `localhost:47317` (gRPC), `localhost:47318` (HTTP) | ponto único de ingestão OTLP |
-| Grafana             | http://localhost:47300                             | dashboards (anônimo como Viewer, `admin`/`admin` para editar) |
-| Prometheus          | http://localhost:47909                             | métricas, retenção 90d |
-| Loki                | http://localhost:47100                             | logs e eventos, retenção 90d |
-| transcript-exporter | —                                                  | nomes reais de ferramenta + medidor de uso |
-| dashboard-generator | —                                                  | um dashboard por conta, a cada 60s |
+| Service             | URL / port                                         | Role |
+|---------------------|----------------------------------------------------|------|
+| OTel Collector      | `localhost:47317` (gRPC), `localhost:47318` (HTTP) | single OTLP ingest endpoint |
+| Grafana             | http://localhost:47300                             | dashboards (anonymous Viewer, `admin`/`admin` to edit) |
+| Prometheus          | http://localhost:47909                             | metrics, 90d retention |
+| Loki                | http://localhost:47100                             | logs and events, 90d retention |
+| transcript-exporter | —                                                  | real tool names + usage meter |
+| dashboard-generator | —                                                  | one dashboard per account |
 
-## Subir
+## Getting started
 
-O caminho mais curto é o wizard. Ele **descobre sozinho** as pastas de config do
-Claude Code, identifica a conta de cada uma, pergunta quais você quer monitorar,
-escreve a configuração e liga a telemetria no shell certo:
+The short path is the wizard. It **discovers on its own** which Claude Code
+config directories you have, identifies the account behind each one, asks which
+ones you want to monitor, writes the configuration and enables telemetry in the
+right shell:
 
 ```sh
 bin/agent-setup
 ```
 
-Na mão:
+By hand:
 
 ```sh
 cd observability
-cp .env.example .env     # ajuste CLAUDE_DIR
+cp .env.example .env     # adjust CLAUDE_DIR
 docker compose up -d
 ```
 
-### Mais de uma conta
+### More than one account
 
-É comum ter contas separadas por contexto (`~/.claude-personal`,
-`~/.claude-work`), cada uma com sua própria pasta de transcripts. A primeira vem
-de `CLAUDE_DIR` no `.env`; as demais entram num `docker-compose.override.yml`,
-montadas em `/transcripts/d1`, `d2`, … — o exporter varre a raiz recursivamente:
+It is common to keep accounts split by context (`~/.claude-personal`,
+`~/.claude-work`), each with its own transcript directory. The first one comes
+from `CLAUDE_DIR` in `.env`; the rest go into a `docker-compose.override.yml`,
+mounted at `/transcripts/d1`, `d2`, … — the exporter scans the root recursively:
 
 ```yaml
 services:
@@ -52,21 +53,22 @@ services:
       - ${HOME}/.claude-work/projects:/transcripts/d1:ro
 ```
 
-O wizard gera esse arquivo quando você escolhe mais de uma pasta, e ainda põe as
-contas que você NÃO escolheu na lista `ignorar` do `account-limits.json` — senão
-elas ganhariam um dashboard vazio assim que aparecessem no Prometheus.
+The wizard generates that file when you pick more than one directory, and also
+puts the accounts you did NOT pick on the `ignore` list in `account-limits.json`
+— otherwise they would get an empty dashboard as soon as they showed up in
+Prometheus.
 
-Nem o `.env` nem o `docker-compose.override.yml` são versionados: apontam para
-caminhos desta máquina. Os modelos são `.env.example` e este README.
+Neither `.env` nor `docker-compose.override.yml` is versioned: they point at
+paths on this machine. The templates are `.env.example` and this README.
 
-Varrer só uma pasta é uma **falha silenciosa**: nada quebra, os painéis
-simplesmente mostram uma fração do uso. Aqui faltavam 331 chamadas de um único
-servidor MCP — o painel dizia 4 mil tokens onde o real era 268 mil.
+Scanning only one directory is a **silent failure**: nothing breaks, the panels
+just show a fraction of your usage. Here that hid 331 calls from a single MCP
+server — the panel read 4 thousand tokens where the real number was 268 thousand.
 
-## Ligar a telemetria em toda sessão
+## Enabling telemetry in every session
 
-O wizard já faz isso, escolhendo o arquivo certo para o seu shell. Na mão, da
-raiz do repo:
+The wizard does this for you, picking the right file for your shell. By hand,
+from the repo root:
 
 ```sh
 cat observability/claude-telemetry.sh   >> ~/.bashrc                    # bash
@@ -74,437 +76,434 @@ cat observability/claude-telemetry.sh   >> ~/.zshrc                     # zsh
 cat observability/claude-telemetry.fish >> ~/.config/fish/config.fish   # fish
 ```
 
-Os dois arquivos têm os mesmos valores — mudou um, mude o outro.
+Both files carry the same values — change one, change the other.
 
-Abra um terminal novo (ou dê `source` no arquivo). O primeiro ponto chega em até
-1min do primeiro prompt (é o intervalo de envio; ver "Consumo de recursos"). Conferir: `claude --debug` sem erros de
-`[3P telemetry]`; no Prometheus, `claude_code_cost_usage_USD_total` retorna séries.
+Open a new terminal (or `source` the file). The first data point arrives within a
+minute of the first prompt (that is the export interval; see "Resource usage").
 
----
+## One dashboard per account — and nothing else
 
-## Um dashboard por conta — e só
+There is no "all accounts" dashboard. Each account has its own MCP servers,
+plugins and configuration, and the numbers do not add up into anything useful.
 
-Não existe dashboard "todas as contas". Cada conta tem MCPs, plugins e
-configuração próprios, e os números não se somam de forma útil.
-
-O `dashboard-generator` sobe junto com o stack e roda a cada 60s. Na primeira vez
-que uma conta nova manda dados, o dashboard dela aparece em ~1min como
+The `dashboard-generator` comes up with the stack and runs every 10 minutes. The
+first time a new account sends data, its dashboard shows up as
 **"Claude Code — <email>"**.
 
-A fonte única é `grafana/templates/claude-code.json`. Ele fica **fora** de
-`grafana/dashboards/` de propósito: aquele é o diretório provisionado, e um
-template lá viraria um dashboard a mais, com filtro de conta vazio. O gerador lê
-o template e troca o que é da conta:
+The single source is `grafana/templates/claude-code.json`. It deliberately sits
+**outside** `grafana/dashboards/`: that is the provisioned directory, and a
+template there would become one more dashboard with an empty account filter. The
+generator reads the template and swaps what is account-specific:
 
-- fixa o filtro de conta num email;
-- injeta o **P75 horário daquela conta** como linha de corte nos painéis de ritmo;
-- injeta as **referências de limite daquela conta** (ver abaixo);
-- popula o seletor de servidor MCP com o que a conta usou de fato.
+- pins the account filter to one email;
+- injects **that account's hourly P75 and outlier fence** as the rate cutlines;
+- injects **that account's limit references** (see below);
+- fills the MCP server and skill owner filters with what the account actually used.
 
-Rodar na mão: `node grafana/generate-account-dashboards.mjs`. Contas que somem
-dos dados têm o arquivo removido na execução seguinte. Os arquivos gerados contêm
-emails, são específicos da máquina e estão no `.gitignore`.
+Run it by hand: `node grafana/generate-account-dashboards.mjs`. Accounts that
+disappear from the data have their file removed on the next run. The generated
+files contain emails, are specific to this machine, and are gitignored.
 
----
+## The limit windows (and why a rolling window was wrong)
 
-## As janelas de limite (e por que a janela móvel estava errada)
+Anthropic enforces two windows, and **neither is a rolling window**:
 
-A Anthropic limita em duas janelas, e **nenhuma das duas é uma janela móvel**:
+- **5h block**: it opens on your first message and expires 5h later. The next
+  block only opens on your next message. A `sum_over_time[5h]` adds the tail of
+  one block to the head of the next — a different measurement entirely.
+- **Week**: it resets on a fixed day. A `sum_over_time[7d]` drags in last week's
+  consumption.
 
-- **Bloco de 5h**: abre na primeira mensagem, expira 5h depois. O próximo bloco
-  só abre na mensagem seguinte. Um `sum_over_time[5h]` soma o fim de um bloco com
-  o começo do outro — mede outra coisa.
-- **Semana**: reseta num dia fixo. Um `sum_over_time[7d]` arrasta consumo da
-  semana passada.
+Finding the block boundary means scanning activity for the gap where the previous
+block expired. LogQL cannot do that, so the **usage-meter** (inside
+transcript-exporter) does it: every pass it measures both windows per account and
+publishes the result back into Loki, on the `service_name="claude-code-usage"`
+stream. The gauges are then a direct read of that value.
 
-Achar a borda do bloco exige varrer a atividade procurando o intervalo em que o
-anterior expirou. O LogQL não faz isso, então quem calcula é o **usage-meter**
-(dentro do transcript-exporter): a cada passada ele mede as duas janelas por
-conta e publica o resultado de volta no Loki, no stream
-`service_name="claude-code-usage"`. As gauges viram uma leitura direta desse
-valor.
+The weekly reset day and hour are configurable on the service (`WEEK_START_DAY`,
+default 1 = Monday; `WEEK_START_HOUR`, default 0; `TZ_OFFSET_HOURS`, default -3).
 
-O dia e a hora do reset semanal são configuráveis no serviço
-(`WEEK_START_DAY`, padrão 1 = segunda; `WEEK_START_HOUR`, padrão 0;
-`TZ_OFFSET_HOURS`, padrão -3).
+### The limit references
 
-### As referências de limite
-
-**A Anthropic não expõe o limite por telemetria nenhuma**, e ele varia por plano.
-As referências ficam em `grafana/account-limits.json`, por conta, em tokens novos.
-Esse arquivo **não é versionado** (contém emails, mesma regra dos dashboards
-gerados) — copie o modelo na primeira vez:
+**Anthropic does not expose the limit through any telemetry**, and it varies by
+plan. The references live in `grafana/account-limits.json`, per account, in new
+tokens. That file is **not versioned** (it contains emails, same rule as the
+generated dashboards) — copy the template the first time:
 
 ```sh
 cp grafana/account-limits.example.json grafana/account-limits.json
 ```
 
-Para calibrar: rode `/usage` na conta, anote as duas percentagens, e compare com
-o que o medidor publicou naquele instante:
+To calibrate: run `/usage` on the account, note both percentages, and compare
+them with what the meter published at that moment:
 
 ```
 {service_name="claude-code-usage"} | user_email = `<email>`
 ```
 
-Então `limite = tokens_do_medidor / (percentual_do_usage / 100)`. A referência da
-conta pessoal foi calibrada assim em 2026-09-17 e bateu em 26,3% contra 26% do
-`/usage`. Contas sem entrada no arquivo usam o bloco `default`.
+Then `limit = meter_tokens / (usage_percentage / 100)`. The personal account here
+was calibrated that way and read 26.3% against `/usage`'s 26%. Accounts with no
+entry fall back to the `default` block.
 
-### Por que "tokens novos"
+### Why "new tokens"
 
-As janelas contam **entrada + saída + criação de cache**. Leitura de cache fica
-fora: é ~97% do volume bruto e não é consumo novo, só o rearrasto de contexto já
-pago. Incluí-la cravaria as gauges em 100% permanentemente.
+The windows count **input + output + cache creation**. Cache reads are excluded:
+they are ~97% of the raw volume and are not new spend, just the drag of context
+you already paid for. Including them would pin the gauges at 100% permanently.
 
----
+## The two data sources
 
-## As duas fontes de dado
+### OTel — what Claude Code sends on its own
 
-### OTel — o que o Claude Code manda sozinho
+The event that matters is `claude_code.api_request`: **one line per API request**,
+carrying `cost_usd`, the four token types, `model`, `effort`, `speed`,
+`duration_ms`, `query_source`, `skill_name`, `session_id`, `prompt_id` and
+`request_id`. Every panel reads from it.
 
-O evento que interessa é o `claude_code.api_request`: **uma linha por requisição
-à API**, com `cost_usd`, os quatro tipos de token, `model`, `effort`, `speed`,
-`duration_ms`, `query_source`, `skill_name`, `session_id`, `prompt_id` e
-`request_id`. Todos os painéis leem dele.
+It is exact per request, unlike the Prometheus metrics, which are per-session
+counters that go stale ~5min after a session ends. Prometheus stays in the stack
+(cheap ingest, long retention, and it is where the account list comes from) but it
+is out of the panels.
 
-É exato por requisição, ao contrário das métricas do Prometheus, que são
-contadores por sessão que ficam stale ~5min depois de a sessão acabar. O
-Prometheus continua no stack (ingestão barata, retenção longa, e é dele que sai a
-lista de contas), mas saiu dos painéis.
+### transcript-exporter — what OTel redacts
 
-### transcript-exporter — o que o OTel redige
+Claude Code **redacts the names of locally configured MCP servers across all of
+its OTel telemetry**: `mcp_server_name` becomes `custom` in the metrics, and since
+2.1.x `tool_name` in the `tool_result` log becomes `mcp_tool`. Only
+`mcp_server_scope` survives. Measured on this machine: **~85% of MCP tokens fell
+into a single anonymous bucket**. It is not a bug and there is no env var to turn
+it off — it is intentional privacy redaction, documented at
+https://code.claude.com/docs/en/monitoring-usage.
 
-O Claude Code **redige o nome de servidores MCP configurados localmente em toda a
-telemetria OTel**: `mcp_server_name` vira `custom` nas métricas, e desde a versão
-2.1.x o `tool_name` do log `tool_result` vira `mcp_tool`. Sobra só
-`mcp_server_scope`. Medido nesta máquina: **~85% dos tokens de MCP caíam no balde
-`custom`**. É redação de privacidade intencional, sem env var para desligar.
+The same redaction applies to **plugin skills**, which become `third-party` in
+`api_request`'s `skill_name`.
 
-A mesma redação vale para **skills de plugin**, que viram `third-party` no
-`skill_name` do `api_request`.
+The local transcripts keep both real names. The exporter scans the config
+directories mounted under `/transcripts` **recursively** and publishes to
+`{service_name="$EXPORTER_STREAM"}`, with a `kind` label separating `tools` (one
+line per `tool_use` block) from `skills` (one line per skill-tagged request). The
+stream name is **versioned** — see "Rescan and reimport" below.
 
-Os transcripts locais guardam os dois nomes reais. O exporter varre **recursivamente** os diretórios de config montados em
-`/transcripts` e publica em
-`{service_name="$EXPORTER_STREAM"}`, com o label `kind` separando `tools` (uma
-linha por bloco `tool_use`) de `skills` (uma linha por mensagem do assistente,
-com os tokens atribuídos à skill ativa). O nome do stream é **versionado** — ver
-"Releitura e reimportação" abaixo. A cola com o OTel
-é o `request_id`, que existe igual nos dois lados.
+#### How tokens are attributed to a tool
 
-#### Como os tokens são atribuídos a uma ferramenta
+A tool's cost is **what the model paid to read its result**: the input side
+(`input_tokens + cache_creation_input_tokens`) of the **next** assistant message
+on the same track. With several tools called in parallel, that total is split
+proportionally to each result's size.
 
-O custo de uma ferramenta é **o que o modelo pagou para ler o resultado dela**: o
-lado de entrada (`input_tokens + cache_creation_input_tokens`) da **próxima**
-mensagem do assistente na mesma trilha. Com várias ferramentas em paralelo, esse
-total é dividido proporcional ao tamanho de cada resultado. `cache_read` fica de
-fora de propósito.
+`cache_read` is left out **on purpose**: what matters is the marginal cost of that
+call, not its drag on later turns. That is why the exporter's number is much
+smaller than Prometheus's `claude_code_token_usage_tokens_total` for the same
+server — they measure different things, and only the exporter's answers "what did
+this tool cost me".
 
-Trilhas de subagente são contabilizadas separadas da principal, senão a primeira
-mensagem de um subagente fecharia a atribuição da ferramenta chamada acima.
+Subagent tracks (`isSidechain`) are tracked separately from the main thread,
+otherwise a subagent's first message would settle the attribution of a tool called
+on the track above.
 
-#### Deduplicação
+#### About the skill numbers
 
-Retomar uma sessão faz o Claude Code reescrever o histórico inteiro num
-transcript novo: mesmo `request_id`, mesmo `tool_use_id`, `session_id` diferente.
-Sem filtrar, cada retomada reconta tudo. A chave é o `tool_use_id`, e o mapa é
-semeado a partir do próprio Loki quando está vazio — o que também torna a perda
-do volume de estado inofensiva (relê tudo, reconhece o que já está lá, grava
-zero duplicata).
+The skills panel reads the exporter's stream, but the **values come from OTel** —
+the exporter republishes the `api_request` attribution, changing only the name, to
+undo the plugin-skill redaction. That is what makes the skills table reconcile
+exactly with the weekly breakdown: `dip-code-review` reads 2,840,009 on both
+sides, and so on.
 
-#### Como a conta de cada chamada é descoberta
+The opposite was tried first and was wrong: a skill can be activated
+**proactively**, with no `Skill` tool call, and the transcript does not cover every
+request (subagents and rotated sessions are missing). Transcript-based attribution
+was off by −87% on one skill and −100% on two others. The transcript now only says
+**which** plugin skill ran in each session, and the name is only restored when a
+session used exactly one — with two, there is no way to tell which is which.
 
-Transcripts não guardam a conta. São duas tentativas, em ordem, e o campo
-`account_source` em cada linha registra qual delas valeu:
+The MCP panel keeps its own transcript-based attribution (the marginal cost of
+reading a result), which is a different measurement with no OTel equivalent.
 
-1. **`otel`** — pelo `session_id`, consultando o evento `api_request` no Loki.
-   É o caminho exato.
-2. **`projeto`** — os transcripts vão mais para trás do que a telemetria, e
-   sessões anteriores ao stack não têm evento OTel nenhum. Para essas, vale o
-   dono do diretório: se todas as sessões já atribuídas de um projeto pertencem
-   à mesma conta, as órfãs dali são dela também. Projeto com duas contas fica
-   sem atribuição — a inferência só age quando não há ambiguidade. O mapa é
-   montado do histórico no Loki **e do lote sendo importado**, senão uma
-   importação do zero nunca inferiria nada. Medido nesta máquina: 1.231 de 1.492
-   registros órfãos recuperados, 0 ambíguos.
+#### Deduplication
 
-O que sobra sem conta (projetos que nunca tiveram sessão com telemetria) existe
-no Loki mas não aparece nos dashboards por conta.
+Resuming a session makes Claude Code rewrite the entire history into a new
+transcript: same `request_id`, same `tool_use_id`, different `session_id`. Without
+filtering, every resume counts everything again. The key is `tool_use_id`, and the
+map is seeded from Loki itself when empty — which also makes losing the state
+volume harmless (it re-reads everything, recognises what is already there, and
+writes zero duplicates).
 
-#### Releitura e reimportação
+#### What has to be scanned
 
-O Loki é append-only, e o exporter guarda o offset no fim de cada transcript —
-um restart não relê nada. Duas operações cobrem isso.
+Two traps in scanning the transcripts, both found after the numbers looked too
+low:
 
-**Releitura** (`--rescan`): zera os offsets e relê tudo, preservando a
-deduplicação. Serve para gerar um tipo de registro **novo** a partir do histórico
-sem reescrever nada do que já existe:
+- **More than one config directory.** Accounts split by context use different
+  directories (`~/.claude-personal`, `~/.claude-work`). Scanning only one loses
+  everything from the other, with no error at all.
+- **Subagents live one level deeper.** Their transcripts are in
+  `<session>/subagents/*.jsonl`. A single-level scan ignores them — that was 134
+  files on one account alone.
+
+Hence the recursive scan from the root, with both directories mounted as
+subfolders of it.
+
+#### How each call's account is discovered
+
+Transcripts do not record the account. There are two attempts, in order, and the
+`account_source` field on each line records which one won:
+
+1. **`otel`** — by `session_id`, querying the `api_request` event in Loki. This is
+   the exact path.
+2. **`project`** — transcripts go further back than the telemetry, and sessions
+   older than this stack have no OTel event at all. For those, the directory's
+   owner decides: if every already-attributed session of a project belongs to the
+   same account, the orphans there belong to it too. A project with two accounts
+   is left alone — the inference only acts when there is no ambiguity. The map is
+   built from Loki history **and from the batch being imported**, otherwise a
+   from-scratch import would never infer anything. Measured here: 1,231 of 1,492
+   orphaned records recovered, 0 ambiguous.
+
+What is left without an account (projects that never had a session with telemetry)
+exists in Loki but does not show up in the per-account dashboards.
+
+#### Rescan and reimport
+
+Loki is append-only, and the exporter stores an offset at the end of each
+transcript — a restart re-reads nothing. Two operations cover this.
+
+**Rescan** (`--rescan`): zeroes the offsets and re-reads everything while keeping
+the dedup map. Use it to generate a **new** record type out of existing history
+without rewriting anything:
 
 ```sh
 docker compose run --rm transcript-exporter node /work/exporter.mjs --rescan --once
 ```
 
-**Reimportação**: para refazer a derivação inteira (por exemplo, depois de mudar
-como a conta ou os tokens são atribuídos), suba a geração do stream — edite
-`EXPORTER_STREAM` no **`.env`**, que é a fonte única lida pelos dois serviços que
-a usam. Depois apague o estado e suba; o `up -d` recria os dois serviços sozinho
-porque a variável mudou:
+**Reimport**: to redo the whole derivation (say, after changing how accounts or
+tokens are attributed), bump the stream generation — edit `EXPORTER_STREAM` in
+**`.env`**, the single source both services read. Then drop the state and come up;
+`up -d` recreates both services on its own because the variable changed:
 
 ```sh
-docker compose stop transcript-exporter && docker compose rm -f transcript-exporter
+docker compose down
 docker volume rm agents-observability_exporter-state
 docker compose up -d
 ```
 
-A geração antiga fica órfã e some sozinha com a retenção de 90 dias.
+The old generation is orphaned and ages out with the 90-day retention.
 
-> **Por que não usar a API de exclusão do Loki.** A tentação é apagar o stream e
-> reimportar no mesmo nome. Não funciona, e falha de um jeito silencioso: um
-> pedido de exclusão marca uma janela de tempo e o Loki passa a **filtrá-la em
-> tempo de query** — o stream parece vazio, mas qualquer coisa reimportada com
-> timestamp histórico cai dentro da janela e nasce invisível. Pior: um pedido já
-> processado **não pode ser removido** (`deletion of request which is in process
-> or already processed is not allowed`), então aquela janela fica cega para
-> sempre naquele stream. Por isso a geração vai no nome.
+> **Why not use Loki's delete API.** The temptation is to delete the stream and
+> reimport under the same name. It does not work, and it fails silently: a delete
+> request marks a time window and Loki starts **filtering it at query time** — the
+> stream looks empty, but anything reimported with historical timestamps lands
+> inside that window and is born invisible. Worse, a request that has already been
+> processed **cannot be removed** (`deletion of request which is in process or
+> already processed is not allowed`), so that window stays blind forever on that
+> stream. Hence the generation in the name.
 
----
+## The panels
 
-## Os painéis
+Eleven panels in five sections, two of them collapsed by default. Reading top to
+bottom, they answer: *how much can I still spend* → *where is it going* → *is my
+rate high right now*.
 
-Onze painéis em cinco seções, duas delas fechadas por padrão. A ordem responde,
-de cima para baixo: *quanto ainda posso gastar* → *no que está indo* → *o ritmo
-está alto?*
+Two filters at the top, **MCP server** and **Skill owner**, both set to "All" by
+default. They only affect the granular tables; the rest of the dashboard ignores
+them.
 
-Dois filtros no topo, **Servidor MCP** e **Dono da skill**, ambos em "Todos" por
-padrão. Eles afetam só as tabelas granulares; o resto do dashboard ignora.
+### Overview
 
-### Visão geral
+| Panel | What it decides |
+|-------|-----------------|
+| **5h block limit — % used** | How much of the current block is gone. If no block is open it reads zero — it does not carry over from the last one. |
+| **Weekly limit — % used** | How much of the weekly limit is gone since the reset. |
+| **Cache reuse** | Share of input that came from cache you already paid for. |
+| **Tokens by model** (donut) | Where the consumption went. |
 
-| Painel | O que decide |
-|--------|--------------|
-| **Limite do bloco de 5h — % usado** | Quanto do bloco corrente já foi consumido. Se nenhum bloco está aberto, é zero — não sobra do anterior. |
-| **Limite semanal — % usado** | Quanto do limite semanal já foi consumido desde o reset. |
-| **Cache reutilizado** | Fatia da entrada que veio de cache já pago. |
-| **Tokens por modelo** (donut) | Para onde o consumo foi. |
-
-As gauges mostram **% usado**, não % restante, de propósito: é a mesma leitura do
-`/usage`, então dá para conferir uma contra a outra sem inverter na cabeça. O
-valor é travado em 100% — estourar o limite não é "mais de 100% do limite", é
-simplesmente estourado. LogQL não tem `clamp_max`, então o travamento sai de
+The gauges show **% used**, not % remaining, on purpose: it is the same reading as
+`/usage`, so you can check one against the other without flipping it in your head.
+The value is clamped at 100% — going over the limit is not "more than 100% of the
+limit", it is simply blown. LogQL has no `clamp_max`, so the clamp comes from
 `(vector(100) < x) or x`.
 
-O donut é em **tokens, não em dólar**: numa assinatura de valor fixo o que acaba
-é o limite, e o dólar não decide nada.
+The donut is in **tokens, not dollars**: on a fixed-price subscription what runs
+out is the limit, and the dollar figure decides nothing.
 
-#### Seção "Detalhamento semanal" (fechada por padrão)
+#### Section "Weekly breakdown" (collapsed by default)
 
-Uma tabela com todo o consumo da semana, quebrado **do maior escopo para o
-menor**: `Modelo | Effort | Origem | Skill | % do limite semanal`. É o recorte
-mais granular da visão geral — responde *por que* o limite está sendo consumido —
-e por isso fica logo abaixo dela, mas fechada: é consulta pontual, não leitura do
-dia a dia.
+One table with all of the week's consumption, broken down **from the widest scope
+to the narrowest**: `Model | Effort | Source | Skill | % of weekly limit`. It is
+the most granular cut of the overview — it answers *why* the limit is being
+consumed — which is why it sits right below it, but collapsed: it is a lookup, not
+daily reading.
 
-Não há coluna de ferramenta: o evento que contabiliza 100% do consumo não carrega
-qual ferramenta foi usada. Esse recorte vive na tabela "Tokens por ferramenta
-MCP", com atribuição própria.
+It covers **all** consumption, not just what ran inside a skill: requests with no
+skill show an empty Skill cell. That is why the footer total reconciles with the
+weekly gauge — verified here: 30.37% in the table against 30.37% on the gauge.
+This holds as long as the time range is the current week (the default); on another
+range the sum becomes that period's.
 
-A tabela cobre **todo** o consumo, não só o que rodou dentro de alguma skill:
-requisições sem skill aparecem com a coluna Skill vazia. Por isso o total do
-rodapé fecha com a gauge de limite semanal — conferido nesta máquina: 30,37% na
-tabela contra 30,37% na gauge. Isso vale enquanto a faixa de tempo for a semana
-corrente (o padrão); em outra faixa a soma passa a ser daquele período.
+There is no tool column: the event that accounts for 100% of consumption does not
+carry which tool was used. That cut lives in the "Tokens by MCP tool" table, with
+its own attribution.
 
-**A coluna Skill aqui é a do OTel, redigida.** Diferente da tabela "Tokens por
-skill", que usa o nome real vindo do transcript, aqui skill de plugin aparece
-como `third-party`. A razão é o fechamento: só o OTel contabiliza 100% do
-consumo, e misturar as duas fontes quebraria a soma. Para saber qual skill está
-por trás de `third-party`, a tabela de Skills e ferramentas responde.
+**The Skill column here is OTel's, redacted.** Unlike the "Tokens by skill" table,
+which uses the real name from the transcript, a plugin skill appears here as
+`third-party`. The reason is the reconciliation: only OTel accounts for 100% of
+consumption, and mixing the two sources would break the sum. To find out which
+skill is behind `third-party`, the Skills and tools table answers.
 
-Um total por skill não diz se o gasto veio do modelo, do effort ou de
-subagentes; aqui essas variáveis estão sempre na mesma linha. É comum a mesma
-skill aparecer barata em `repl_main_thread` e cara em
-`agent:builtin:general-purpose` — a skill não é cara, os subagentes dela é que
-são. A origem fica crua de propósito, para mostrar **qual** subagente rodou.
+### Skills and tools
 
-### Skills e ferramentas
+| Panel | What it decides |
+|-------|-----------------|
+| **Tokens by skill** (table) | Which skill consumes most, with its real name. |
+| **Tokens by MCP server** (table) | Which server consumes most. Clicking the name filters the detail section. |
+| **Tokens by source** (donut) | Main thread, subagents, or auxiliary calls. |
 
-| Painel | O que decide |
-|--------|--------------|
-| **Tokens por skill** (tabela) | Qual skill consome mais, com o nome real. |
-| **Tokens por servidor MCP** (tabela) | Qual servidor consome mais. Clicar no nome filtra a seção de detalhe. |
-| **Tokens por origem** (donut) | Thread principal, subagentes ou chamadas auxiliares. |
+Below them, in the collapsed **"MCP tools — per-tool breakdown"** section, a table
+with the finest cut: what each specific call cost. Same pattern as the weekly
+breakdown — the granular cut stays collapsed, right below the panel it details.
 
-Abaixo deles, na seção fechada **"Ferramentas MCP — detalhe por ferramenta"**,
-uma tabela com o nível mais fino: quanto cada chamada específica custou. Mesmo
-padrão do detalhamento semanal — o recorte granular fica fechado, logo abaixo do
-painel que ele detalha.
+The tables carry a bar inside the cell and come sorted highest first. Tables
+rather than bar charts for two practical reasons: they sort natively, and they
+give the name full width — in a bar chart the names were cut off after the first
+few characters.
 
-As tabelas trazem uma barra dentro da célula e vêm ordenadas do maior para o
-menor. Tabela e não gráfico de barras por dois motivos práticos: ela ordena
-nativamente, e dá largura inteira ao nome — numa barra os nomes eram cortados nos
-primeiros caracteres.
+The top filters act here: **Skill owner** narrows to one plugin (e.g.
+`superpowers`) or to local skills; **MCP server** narrows both the server summary
+table and the tool table — picking a server collapses the summary to a single row,
+which is the expected effect of clicking its name.
 
-Os filtros do topo agem aqui: **Dono da skill** restringe a um plugin (ex.:
-`superpowers`) ou às skills locais; **Servidor MCP** restringe tanto a tabela-resumo
-de servidores quanto a de ferramentas — selecionar um servidor colapsa a
-tabela-resumo a uma linha só, que é o efeito esperado de clicar no nome dela. O valor de cada opção é um regex aplicado direto no matcher do
-LogQL (`superpowers:.*`, `[^:]+` para skill sem plugin, `.*` para todos), o que
-evita precisar de qualquer label novo no dado.
-
-**Sobre os números de skill.** O painel lê o stream do transcript-exporter, mas
-os valores vêm do próprio OTel — o exporter republica a atribuição do evento
-`api_request` trocando só o nome, para desfazer a redação de skill de plugin.
-Isso é o que faz a tabela de skills fechar exatamente com o detalhamento semanal:
-conferido, `dip-code-review` 2.840.009 nos dois lados, e assim por diante.
-
-Tentei o contrário primeiro — derivar a atribuição do transcript — e estava
-errado: skill pode ser ativada **proativamente**, sem chamada do tool `Skill`, e
-o transcript não cobre todas as requisições (subagentes e sessões rotacionadas
-ficam de fora). A atribuição por transcript errava −87% numa skill e −100% em
-outras duas. O transcript hoje serve só para dizer **qual** skill de plugin
-rodou em cada sessão, e o nome só é restaurado quando a sessão usou exatamente
-uma — com duas, não dá para saber qual é qual.
-
-O painel de MCP continua com atribuição própria do transcript (marginal de
-leitura do resultado), que é outra medida e não tem equivalente no OTel.
-
-O donut de origem agrupa o `query_source`, que no Loki vem detalhado
+The source donut groups `query_source`, which arrives detailed in Loki
 (`repl_main_thread`, `agent:builtin:general-purpose`, `agent_summary`, …):
-`repl_main_thread` → **main**, `agent:*` → **subagent**, o resto → **auxiliary**.
+`repl_main_thread` → **main**, `agent:*` → **subagent**, everything else →
+**auxiliary**.
 
-### Ritmo de consumo
+### Consumption rate
 
-Dois gráficos de linha em tokens/hora, medidos em **janelas fixas de 15
-minutos**. Períodos sem uso caem para zero (`or vector(0)`), não viram lacuna. O
-segundo separa entrada de saída (azul = entrada, roxo = saída).
+Two line charts in tokens/hour, measured over **fixed 15-minute windows**. Idle
+periods drop to zero (`or vector(0)`) rather than becoming gaps. The second one
+splits input from output (blue = input, purple = output).
 
-A janela é fixa, e não `$__interval`, por um motivo específico: as linhas de
-corte são pré-calculadas, e só fazem sentido se forem calculadas sobre
-exatamente a mesma distribuição que o gráfico desenha. A mesma atividade medida
-em janelas diferentes dá taxas horárias muito diferentes — nesta máquina, a P75
-do consumo saltou de 473k (janelas de 1h) para 810k (janelas de 5min), porque um
-pico de 5 minutos tem taxa horária muito maior do que a mesma atividade diluída
-numa hora. 15 minutos é o meio-termo: 1h borrava um pico de 5min num bloco
-retangular de 1h de largura, 5min ficava ruidoso demais.
+The window is fixed rather than `$__interval` for a specific reason: the cutlines
+are precomputed, and they only make sense if computed over exactly the same
+distribution the graph draws. The same activity measured over different windows
+gives very different hourly rates — on this machine the P75 jumped from 473k (1h
+windows) to 810k (5min windows), because a 5-minute burst has a far higher hourly
+rate than the same activity spread over an hour. 15 minutes is the middle ground:
+1h smeared a 5min burst into a 1h-wide rectangle, 5min was too noisy.
 
-O preço disso é que em faixas muito largas (30d) o passo do gráfico fica maior
-que 15min e a série passa a ser uma amostragem das taxas, não uma cobertura
-contínua.
+The price is that on very wide ranges (30d) the graph's step exceeds 15min and the
+series becomes a sampling of rates rather than continuous coverage.
 
-### As duas linhas de corte
+### The two cutlines
 
-Ambas calculadas pelo `dashboard-generator` sobre o histórico de 7 dias **da
-conta**, a cada 60s, **descartando os períodos parados** — incluir zeros puxaria
-os quantis para baixo e a linha passaria a dizer apenas "está usando", não "está
-usando muito":
+Both are computed by the `dashboard-generator` over **that account's** last 7
+days, **discarding idle periods** — including zeros would pull the quantiles down
+and the line would only mean "is using", not "is using a lot":
 
-| Linha | O que é | O que significa |
+| Line | What it is | What it means |
 |---|---|---|
-| amarela | P75 | Acima dela, você está no quarto mais intenso do seu normal. |
-| laranja | Q3 + 1,5×IQR (cerca de Tukey) | Acima dela não é "intenso", é atípico. Vale olhar o que rodou ali. |
+| yellow | P75 | Above it you are in the busiest quarter of your own normal. |
+| orange | Q3 + 1.5×IQR (Tukey's fence) | Above it is not "busy", it is atypical. Worth looking at what ran there. |
 
-Conferido contra a série real desta máquina: 25% das amostras acima da amarela
-(que é o que P75 quer dizer) e 5% acima da laranja.
+Checked against this machine's real series: 25% of samples above the yellow line
+(which is what P75 means) and 5% above the orange one.
 
-Os valores variam bastante entre contas — 765k/1,71M numa, 1,89M/4,43M noutra —
-que é o motivo de serem por conta e não constantes.
+The values vary a lot between accounts — 765k/1.71M on one, 1.89M/4.43M on another
+— which is why they are per account rather than constants.
 
-O painel de entrada/saída tem linhas **próprias de cada série**, calculadas só
-sobre ela. Entrada e saída têm ordens de grandeza bem diferentes — nesta máquina,
-P75 de 45k para entrada contra 144k para saída — então usar o corte do total ali
-compararia coisas diferentes.
+The input/output panel has cutlines **of its own per series**, computed only over
+that series. Input and output differ by an order of magnitude — here, a P75 of 45k
+for input against 144k for output — so using the total's cutline there would
+compare different things.
 
-Quantil de agregado não existe em LogQL (dá para tirar quantil dos valores
-individuais, não dos baldes que o gráfico desenha), por isso o cálculo mora no
-gerador.
+LogQL has no quantile over an aggregate (you can take a quantile of individual
+values, not of the buckets the graph draws), which is why the computation lives in
+the generator.
 
-### Faixa de tempo
+### Time range
 
-O padrão é **`now/w+9h+24h` → `now`** (semana corrente, a partir de segunda às
-9h). O seletor traz também *Dia corrente* (`now/d+9h`), *5 horas*, *24 horas*,
-*7 dias* e *30 dias*.
+The default is **`now/w+9h+24h` → `now`** (current week, from Monday 9am). The
+picker also offers *Current day* (`now/d+9h`), *5 hours*, *24 hours*, *7 days* and
+*30 days*.
 
-Chamada MCP e execução de skill são esparsas — é por isso que o padrão é a
-semana.
+The week rather than the day because **skills and MCP calls are sparse**: on a day
+with no MCP use, or no skill run, those panels opened empty — and a dashboard that
+opens empty is worth nothing. The week keeps the "right now" framing and still has
+something to show.
 
-A semana e não o dia porque **skill e MCP são esparsos**: num dia sem uso de MCP,
-ou num dia em que nenhuma skill rodou, esses painéis abriam vazios — e um
-dashboard que abre vazio não serve para nada. A semana mantém o recorte "agora"
-e ainda tem o que mostrar.
+The limit gauges **ignore this picker**: their windows are Anthropic's, not the
+analysis window.
 
-As gauges de limite **ignoram esse seletor**: as janelas delas são as da
-Anthropic, não as da análise.
+## Adding other tools later
 
----
+- **GitHub Copilot** — no local telemetry. Poll the Copilot Metrics API with a
+  small scraper exposing `/metrics`.
+- **OpenAI Codex CLI** — no native OTEL. Parse its session JSONL.
+- Give every adapter a `tool="…"` label.
 
-## Adicionar outras ferramentas depois
-
-- **GitHub Copilot** — sem telemetria local. Consultar a Copilot Metrics API com
-  um scraper que exponha `/metrics`.
-- **OpenAI Codex CLI** — sem OTEL nativo. Parsear o JSONL de sessão.
-- Dar a todo adaptador um label `tool="…"`.
-
-## Parar / resetar
+## Stop / reset
 
 ```sh
-docker compose down           # para, mantém os dados
-docker compose down -v        # para, apaga tudo
+docker compose down           # stop, keep the data
+docker compose down -v        # stop, wipe everything
 ```
 
-## Armadilhas conhecidas
+## Known traps
 
-**`allowUiUpdates` tem que ser `false`.** Com `true`, na primeira vez que um
-dashboard é tocado pela UI o Grafana desvincula ele do provisionamento
-(`meta.provisioned` vira `false`) e passa a servir a cópia do banco para sempre —
-o arquivo muda e nada acontece. Como estes dashboards são regerados a cada 60s, a
-cópia do banco nunca deve ganhar da do arquivo. Para conferir o que está sendo
-realmente servido (e não só o que está no arquivo):
+**`allowUiUpdates` must be `false`.** With `true`, the first time a dashboard is
+touched through the UI, Grafana unlinks it from provisioning (`meta.provisioned`
+goes `false`) and serves the database copy forever — the file changes and nothing
+happens. Since these dashboards are regenerated on a schedule, the database copy
+must never win. To check what is actually being served (not just what is on disk):
 
 ```sh
 curl -s -u admin:admin http://localhost:47300/api/dashboards/uid/cc-<slug> \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["meta"]["provisioned"], d["dashboard"]["version"])'
 ```
 
-**Query `instant` estraga o nome das séries.** O Loki devolve frames
-`numeric-multi` em queries instant; o Grafana junta esses frames num só e renomeia
-os campos para `Value #A`, jogando fora o nome do `legendFormat`. Todos os
-painéis usam `range`, menos a tabela de investigação — lá `range` renderizaria
-uma linha por passo do gráfico em vez de uma por combinação.
+**An `instant` query breaks series names.** Loki returns `numeric-multi` frames
+for instant queries; Grafana merges those frames into one and renames the fields
+to `Value #A`, discarding the name from `legendFormat`. Every panel uses `range`
+except the weekly breakdown table — there, `range` would render one row per graph
+step instead of one per combination.
 
-## Consumo de recursos
+## Resource usage
 
-O stack roda o dia inteiro numa máquina de desenvolvedor, então o que pesa não é
-CPU de pico — é **frequência de acordar**. Cada tarefa periódica impede a CPU de
-ficar ociosa, e isso é bateria.
+The stack runs all day on a developer machine, so what matters is not peak CPU —
+it is **how often things wake up**. Every periodic task keeps the CPU from going
+idle, and that is battery.
 
-As cadências foram calibradas para o dado ser útil, não para ser instantâneo:
+The intervals are tuned for the data to be useful, not instantaneous:
 
-| Componente | Intervalo | Por quê |
+| Component | Interval | Why |
 |---|---|---|
-| Claude Code → collector | 60s (métricas), 30s (logs) | roda em TODA sessão; era 10s/5s |
-| `transcript-exporter` | 120s | cada passada varre centenas de transcripts |
-| `dashboard-generator` | 600s | sobe um processo Node e consulta 7–30 dias |
-| Grafana reprovisiona | 300s | relê e reparseia todos os dashboards do disco |
-| Prometheus scrape | 60s | só serve para listar contas; os painéis leem do Loki |
-| Compactor do Loki | 600s | padrão da imagem |
-| Auto-refresh do dashboard | 300s | cada refresh dispara ~14 queries |
+| Claude Code → collector | 60s (metrics), 30s (logs) | runs in EVERY session; was 10s/5s |
+| `transcript-exporter` | 120s | each pass scans hundreds of transcripts |
+| `dashboard-generator` | 600s | spawns a Node process and queries 7–30 days |
+| Grafana re-provision | 300s | re-parses every dashboard on disk |
+| Prometheus scrape | 60s | only used to list accounts; the panels read Loki |
+| Loki compactor | 600s | the image's default |
+| Dashboard auto-refresh | 300s | each refresh fires ~14 Loki queries |
 
-Isso é **~82% menos acordadas por hora** do que a configuração inicial (1740 →
-306). O Grafana também tem desligados o alerting unificado (mantém um agendador
-rodando mesmo sem regras), as checagens de versão e o envio de analytics.
+That is **~82% fewer wakeups per hour** than the initial configuration (1740 →
+306). Grafana also has unified alerting (which keeps a scheduler running even with
+zero rules), version checks and analytics turned off.
 
-Em repouso, o stack fica em torno de **700 MiB** e CPU perto de zero. Se precisar
-de dado mais fresco pontualmente, aumente o refresh na própria aba do Grafana em
-vez de baixar os intervalos de novo.
+At rest the stack sits around **700 MiB** with CPU near zero. If you need fresher
+data occasionally, raise the refresh in the Grafana tab rather than lowering these
+intervals again.
 
-## Notas
+## Notes
 
-- Portas no host: 47300 (Grafana), 47317/47318 (OTLP), 47909 (Prometheus),
-  47100 (Loki).
-- Grafana roda anônimo (Viewer) com `admin`/`admin` para edição — só aceitável em
-  localhost.
-- `loki-config.yaml` desvia do padrão da imagem em quatro pontos, comentados no
-  arquivo: aceita amostras antigas (backfill), tira o teto de janela de consulta,
-  liga retenção de 90d, e sobe o `ingester.max_chunk_age` — sem isso o Loki
-  recusa com HTTP 400 todo backfill histórico assim que o stream tem uma linha
-  recente (escrita fora de ordem só é aceita dentro de meia `max_chunk_age` do
-  ponto mais recente).
+- Host ports: 47300 (Grafana), 47317/47318 (OTLP), 47909 (Prometheus), 47100
+  (Loki). All published on `127.0.0.1`, not `0.0.0.0` — Grafana runs anonymous and
+  the Loki API has no authentication, so binding them to every interface would
+  expose both to anyone on the same network.
+- Metric names carry the Prometheus exporter's unit and type suffixes, e.g.
+  `claude_code_cost_usage_USD_total`.
+- Resource attributes (`user.email`, `organization.id`, `service.name`) become
+  Prometheus labels (`user_email`, …) through `resource_to_telemetry_conversion`.
+- `loki-config.yaml` deviates from the image's default in four places, all
+  commented in the file: it accepts old samples (backfill), removes the query
+  window cap, enables 90d retention, and raises `ingester.max_chunk_age` — without
+  that last one Loki rejects every historical backfill with HTTP 400 as soon as the
+  stream has a recent line.

@@ -16,8 +16,10 @@
 # Bundle merge behaviour (used by both the wizard's "skills" step and `install`):
 #   .claude/skills/*         copied per-skill; existing dirs skipped unless --force
 #   .claude/commands/*       copied per-tree;  existing files skipped unless --force
-#   .claude/settings.local.json   permissions.allow + enabledMcpjsonServers merged (deduped)
-#   .mcp.json               mcpServers merged (existing keys kept unless --force) — project scope only
+#   .claude/agents/*         copied per-file;  existing files skipped unless --force
+#   .claude/hooks/*          copied per-file;  existing files skipped unless --force
+#   .claude/settings.local.template.json -> target's settings.local.json
+#                            permissions.allow + hooks merged (deduped)
 
 set -euo pipefail
 
@@ -41,9 +43,9 @@ require_jq() {
 }
 
 # --- bundle: skills/commands/settings/mcp ------------------------------------
-# install_bundle TARGET FORCE(0|1) INCLUDE_MCP(0|1)
+# install_bundle TARGET FORCE(0|1)
 install_bundle() {
-  local target="$1" force="$2" include_mcp="$3"
+  local target="$1" force="$2"
   [ -d "$BUNDLE/.claude" ] || { echo "agent-setup: bundle not found at $BUNDLE" >&2; exit 1; }
   require_jq
 
@@ -75,7 +77,24 @@ install_bundle() {
     echo "  cmd    $rel  (installed)"; copied=$((copied+1))
   done < <( cd "$BUNDLE/.claude" && find commands -type f )
 
-  local bset="$BUNDLE/.claude/settings.local.json"
+  # Agent definitions and the SessionStart hook: same per-file copy as commands.
+  while IFS= read -r rel; do
+    local src="$BUNDLE/.claude/$rel"
+    local dst="$target/.claude/$rel"
+    mkdir -p "$(dirname "$dst")"
+    if [ -e "$dst" ] && [ "$force" -eq 0 ]; then
+      echo "  agent  $rel  (exists, skip)"; skipped=$((skipped+1)); continue
+    fi
+    cp "$src" "$dst"
+    [ "${rel%.sh}" != "$rel" ] && chmod +x "$dst"
+    echo "  agent  $rel  (installed)"; copied=$((copied+1))
+  done < <( cd "$BUNDLE/.claude" && find agents hooks -type f 2>/dev/null )
+
+  # The bundle ships this as *.template.json: a file literally named
+  # settings.local.json is caught by the common global gitignore rule
+  # (**/.claude/settings.local.json), so it would never be versioned — and a fresh
+  # clone would silently install no permissions and no hooks at all.
+  local bset="$BUNDLE/.claude/settings.local.template.json"
   local tset="$target/.claude/settings.local.json"
   if [ -f "$bset" ]; then
     if [ -f "$tset" ]; then
@@ -84,7 +103,7 @@ install_bundle() {
         .[0] as $cur | .[1] as $add |
         $cur
         | .permissions.allow = (((($cur.permissions.allow) // []) + (($add.permissions.allow) // [])) | unique)
-        | .enabledMcpjsonServers = (((($cur.enabledMcpjsonServers) // []) + (($add.enabledMcpjsonServers) // [])) | unique)
+        | .hooks = (($cur.hooks) // {}) * (($add.hooks) // {})
       ' "$tset" "$bset" > "$tmp" && mv "$tmp" "$tset"
       echo "  cfg    .claude/settings.local.json  (merged)"
     else
@@ -92,27 +111,6 @@ install_bundle() {
       echo "  cfg    .claude/settings.local.json  (installed)"
     fi
     copied=$((copied+1))
-  fi
-
-  if [ "$include_mcp" -eq 1 ]; then
-    local bmcp="$BUNDLE/.mcp.json"
-    local tmcp="$target/.mcp.json"
-    if [ -f "$bmcp" ]; then
-      if [ -f "$tmcp" ]; then
-        local tmp; tmp="$(mktemp)"
-        if [ "$force" -eq 1 ]; then
-          jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($c.mcpServers // {}) + ($a.mcpServers // {}))' "$tmcp" "$bmcp" > "$tmp"
-        else
-          jq -s '.[0] as $c | .[1] as $a | $c | .mcpServers = (($a.mcpServers // {}) + ($c.mcpServers // {}))' "$tmcp" "$bmcp" > "$tmp"
-        fi
-        mv "$tmp" "$tmcp"
-        echo "  cfg    .mcp.json  (merged)"
-      else
-        cp "$bmcp" "$tmcp"
-        echo "  cfg    .mcp.json  (installed)"
-      fi
-      copied=$((copied+1))
-    fi
   fi
 
   echo
@@ -126,8 +124,7 @@ cmd_list() {
   echo "skills:";   ls -1 "$BUNDLE/.claude/skills" | sed 's/^/  /'
   echo "commands:"; ( cd "$BUNDLE/.claude" && find commands -type f | sed 's/^/  /' )
   echo "configs:"
-  echo "  .claude/settings.local.json (permissions.allow, enabledMcpjsonServers)"
-  echo "  .mcp.json (mcpServers)"
+  echo "  .claude/settings.local.json (permissions.allow)"
   echo
   echo "wizard also offers: MCP servers (context7, github, playwright,"
   echo "sequential-thinking), rtk, ponytail, caveman, superpowers, anthropic"
@@ -143,7 +140,7 @@ cmd_install() {
       *)  target="$arg" ;;
     esac
   done
-  install_bundle "${target:-$PWD}" "$force" 1
+  install_bundle "${target:-$PWD}" "$force"
 }
 
 # --- wizard helpers -----------------------------------------------------------
@@ -159,7 +156,7 @@ ask_yn() {
 # ask_scope "label" -> echoes "global" or "projeto"
 ask_scope() {
   local label="$1" ans
-  read -r -p "    -> $label: instalar (g)lobal [todos os projetos] ou (p)rojeto [$PWD]? [p] " ans >&2 || ans=""
+  read -r -p "    -> $label: install (g)lobal [all projects] or (p)roject [$PWD]? [p] " ans >&2 || ans=""
   ans="${ans:-p}"
   if [[ "$ans" =~ ^[Gg] ]]; then echo global; else echo projeto; fi
 }
@@ -168,22 +165,22 @@ section() { echo; echo "── $1 ───────────────�
 
 wizard_bundle() {
   section "Skills & commands (OpenSpec, commit-split)"
-  if ask_yn "Instalar o bundle de skills/commands compartilhados?" Y; then
+  if ask_yn "Install the shared skills/commands bundle?" Y; then
     local scope; scope="$(ask_scope "skills/commands")"
     local target=$PWD
     [ "$scope" = "global" ] && target="$HOME"
-    install_bundle "$target" 0 0
+    install_bundle "$target" 0
   fi
 }
 
 wizard_mcp() {
-  section "Servidores MCP"
-  echo "  Escolha quais habilitar. Cada um pode ir global (todos os projetos, escopo 'user')"
-  echo "  ou só neste projeto (escopo 'project', gera/edita .mcp.json)."
+  section "MCP servers"
+  echo "  Pick which ones to enable. Each can go global (all projects, 'user' scope)"
+  echo "  or project-only ('project' scope, writes .mcp.json in this repo)."
 
   local name cmd scope claude_scope
 
-  if ask_yn "  context7 (docs de libs sempre atualizadas)?" Y; then
+  if ask_yn "  context7 (always-current library docs)?" Y; then
     scope="$(ask_scope "context7")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
     claude mcp add context7 --scope "$claude_scope" -- npx -y @upstash/context7-mcp || true
   fi
@@ -194,23 +191,23 @@ wizard_mcp() {
     echo "    (na primeira vez: rode 'claude mcp login github' pra autenticar)"
   fi
 
-  if ask_yn "  Playwright (automação/inspeção de browser)?" Y; then
+  if ask_yn "  Playwright (browser automation/inspection)?" Y; then
     scope="$(ask_scope "playwright")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
     claude mcp add playwright --scope "$claude_scope" -- npx -y @playwright/mcp@latest || true
   fi
 
-  if ask_yn "  Sequential Thinking (força raciocínio passo-a-passo em tarefas complexas)?" N; then
+  if ask_yn "  Sequential Thinking (forces step-by-step reasoning on complex tasks)?" N; then
     scope="$(ask_scope "sequential-thinking")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
     claude mcp add sequential-thinking --scope "$claude_scope" -- npx -y @modelcontextprotocol/server-sequential-thinking || true
   fi
 }
 
 wizard_rtk() {
-  section "rtk (Rust Token Killer — comprime output de bash em até 90%)"
-  if ask_yn "  Instalar rtk?" N; then
+  section "rtk (Rust Token Killer — compresses bash output by up to 90%)"
+  if ask_yn "  Install rtk?" N; then
     if ! command -v rtk >/dev/null; then
       curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
-      echo '  (adicione ~/.local/bin ao PATH se ainda não estiver)'
+      echo '  (add ~/.local/bin to PATH if it is not there yet)'
     else
       echo "  rtk já instalado ($(command -v rtk))"
     fi
@@ -227,15 +224,15 @@ wizard_plugin() {
   # wizard_plugin "label" "marketplace-repo (empty = already-registered marketplace)" "plugin@marketplace"
   local label="$1" repo="$2" plugin="$3" scope claude_scope
   section "$label"
-  if ask_yn "  Instalar $label?" N; then
+  if ask_yn "  Install $label?" N; then
     [ -n "$repo" ] && { claude plugin marketplace add "$repo" || true; }
     scope="$(ask_scope "$label")"; claude_scope=user; [ "$scope" = "projeto" ] && claude_scope=project
     claude plugin install "$plugin" --scope "$claude_scope" -y || true
   fi
 }
 
-# Descobre as pastas de config do Claude Code (as que têm "projects/" dentro) e a
-# conta de cada uma, lida do oauthAccount do .claude.json. Ecoa "caminho<TAB>email".
+# Discovers Claude Code config directories (the ones with "projects/" inside) and
+# the account of each, read from oauthAccount in .claude.json. Echoes "path<TAB>email".
 discover_claude_dirs() {
   local d email
   for d in "$HOME"/.claude "$HOME"/.claude-*; do
@@ -250,11 +247,12 @@ except Exception:
   done
 }
 
-# Escreve .env (+ docker-compose.override.yml, se houver mais de uma pasta) e
-# registra em account-limits.json as contas que o usuário NÃO quer monitorar.
+# Writes .env (+ docker-compose.override.yml when there is more than one
+# directory) and records in account-limits.json the accounts the user does NOT
+# want to monitor.
 wizard_observability_dirs() {
   local obs="$REPO_ROOT/observability"
-  section "Observability — quais contas monitorar"
+  section "Observability — which accounts to monitor"
 
   local -a dirs=() emails=()
   local d e
@@ -263,98 +261,98 @@ wizard_observability_dirs() {
   done < <(discover_claude_dirs)
 
   if [ "${#dirs[@]}" -eq 0 ]; then
-    echo "  Nenhuma pasta de config encontrada (~/.claude*/projects)."
-    echo "  Usando o padrão ~/.claude — rode o wizard de novo após a primeira sessão."
+    echo "  No config directory found (~/.claude*/projects)."
+    echo "  Falling back to ~/.claude — re-run the wizard after your first session."
     printf 'EXPORTER_STREAM=claude-code-exporter-1\nCLAUDE_DIR=${HOME}/.claude\n' > "$obs/.env"
     return
   fi
 
-  echo "  Encontrei:"
+  echo "  Found:"
   local i
   for i in "${!dirs[@]}"; do
     printf '    [%d] %-24s %s\n' "$((i+1))" "$(basename "${dirs[$i]}")" "${emails[$i]}"
   done
   echo
 
-  local -a escolhidas=()
+  local -a chosen=()
   if [ "${#dirs[@]}" -eq 1 ]; then
-    escolhidas=(0)
-    echo "  Só uma pasta — usando ela."
-  elif ask_yn "  Monitorar todas essas contas?" Y; then
-    for i in "${!dirs[@]}"; do escolhidas+=("$i"); done
+    chosen=(0)
+    echo "  Only one directory — using it."
+  elif ask_yn "  Monitor all of these accounts?" Y; then
+    for i in "${!dirs[@]}"; do chosen+=("$i"); done
   else
     for i in "${!dirs[@]}"; do
-      ask_yn "    Monitorar ${emails[$i]} ($(basename "${dirs[$i]}"))?" Y && escolhidas+=("$i")
+      ask_yn "    Monitor ${emails[$i]} ($(basename "${dirs[$i]}"))?" Y && chosen+=("$i")
     done
   fi
 
-  if [ "${#escolhidas[@]}" -eq 0 ]; then
-    echo "  Nenhuma conta escolhida; nada a configurar."
+  if [ "${#chosen[@]}" -eq 0 ]; then
+    echo "  No account selected; nothing to configure."
     return
   fi
 
-  # Preserva o EXPORTER_STREAM atual: trocá-lo sem querer faz o stack reimportar
-  # tudo num stream novo e abandonar o anterior.
+  # Preserve the current EXPORTER_STREAM: changing it by accident makes the stack
+  # reimport everything into a new stream and orphan the old one.
   local stream=""
   [ -f "$obs/.env" ] && stream="$(sed -n 's/^EXPORTER_STREAM=//p' "$obs/.env" | head -1)"
   [ -n "$stream" ] || stream="claude-code-exporter-1"
 
   {
-    echo "# Gerado por agent-setup. Não versionado (caminhos desta máquina)."
-    echo "# Modelo: .env.example"
+    echo "# Generated by agent-setup. Not versioned (paths on this machine)."
+    echo "# Template: .env.example"
     echo "EXPORTER_STREAM=$stream"
-    echo "CLAUDE_DIR=${dirs[${escolhidas[0]}]}"
+    echo "CLAUDE_DIR=${dirs[${chosen[0]}]}"
   } > "$obs/.env"
 
-  if [ "${#escolhidas[@]}" -gt 1 ]; then
+  if [ "${#chosen[@]}" -gt 1 ]; then
     {
-      echo "# Gerado por agent-setup. Não versionado."
-      echo "# A primeira pasta vem do CLAUDE_DIR no .env; as demais entram aqui."
+      echo "# Generated by agent-setup. Not versioned."
+      echo "# The first directory comes from CLAUDE_DIR in .env; the rest go here."
       echo "services:"
       echo "  transcript-exporter:"
       echo "    volumes:"
       local n=1 idx
-      for idx in "${escolhidas[@]:1}"; do
+      for idx in "${chosen[@]:1}"; do
         echo "      - ${dirs[$idx]}/projects:/transcripts/d$n:ro"
         n=$((n+1))
       done
     } > "$obs/docker-compose.override.yml"
-    echo "  ${#escolhidas[@]} pastas configuradas (.env + docker-compose.override.yml)"
+    echo "  ${#chosen[@]} directories configured (.env + docker-compose.override.yml)"
   else
     rm -f "$obs/docker-compose.override.yml"
-    echo "  1 pasta configurada (.env)"
+    echo "  1 directory configured (.env)"
   fi
 
-  # Conta descoberta que ficou de fora entra na lista de ignorados: sem isso o
-  # gerador cria um dashboard vazio para ela assim que o email aparecer no
-  # Prometheus (e o email só sai de lá quando a retenção expira).
-  local -a fora=()
-  local dentro idx
+  # A discovered account that was left out goes on the ignore list: without it the
+  # generator creates an empty dashboard for it as soon as the email shows up in
+  # Prometheus (and the email only leaves when retention expires).
+  local -a out_of=()
+  local inside idx
   for i in "${!dirs[@]}"; do
-    dentro=0
-    for idx in "${escolhidas[@]}"; do [ "$idx" = "$i" ] && dentro=1; done
-    if [ "$dentro" = 0 ] && [ "${emails[$i]}" != "(conta nao identificada)" ]; then
-      fora+=("${emails[$i]}")
+    inside=0
+    for idx in "${chosen[@]}"; do [ "$idx" = "$i" ] && inside=1; done
+    if [ "$inside" = 0 ] && [ "${emails[$i]}" != "(account not identified)" ]; then
+      out_of+=("${emails[$i]}")
     fi
   done
-  local limites="$obs/grafana/account-limits.json"
-  [ -f "$limites" ] || cp "$obs/grafana/account-limits.example.json" "$limites"
-  if [ "${#fora[@]}" -gt 0 ]; then
+  local limits_file="$obs/grafana/account-limits.json"
+  [ -f "$limits_file" ] || cp "$obs/grafana/account-limits.example.json" "$limits_file"
+  if [ "${#out_of[@]}" -gt 0 ]; then
     if command -v jq >/dev/null; then
       local tmp; tmp="$(mktemp)"
-      jq --argjson ig "$(printf '%s\n' "${fora[@]}" | jq -R . | jq -s .)" \
-        '.ignorar = $ig | .contas = {}' "$limites" > "$tmp" && mv "$tmp" "$limites"
-      echo "  fora do monitoramento: ${fora[*]}"
+      jq --argjson ig "$(printf '%s\n' "${out_of[@]}" | jq -R . | jq -s .)" \
+        '.ignore = $ig | .accounts = {}' "$limits_file" > "$tmp" && mv "$tmp" "$limits_file"
+      echo "  not monitored: ${out_of[*]}"
     else
-      echo "  aviso: jq ausente — adicione à mão em grafana/account-limits.json:"
-      echo "         \"ignorar\": [${fora[*]}]"
+      echo "  warning: jq missing — add this by hand to grafana/account-limits.json:"
+      echo "           \"ignore\": [${out_of[*]}]"
     fi
   fi
 }
 
 wizard_observability() {
   section "Observability (OTel Collector + Prometheus + Loki + Grafana, local)"
-  if ask_yn "  Subir a stack e ligar o telemetry do Claude Code neste shell?" N; then
+  if ask_yn "  Bring the stack up and enable Claude Code telemetry in this shell?" N; then
     wizard_observability_dirs
     ( cd "$REPO_ROOT/observability" && docker compose up -d )
     echo "  Grafana: http://localhost:47300  (dashboard 'Claude Code — Uso & Custo')"
@@ -373,9 +371,9 @@ wizard_observability() {
       fi
     else
       if ! grep -qF "$marker" "$rc" 2>/dev/null; then
-        # Lê do arquivo em vez de repetir os valores aqui: duplicar deixou os
-        # intervalos defasados uma vez, com o wizard escrevendo 10s/5s enquanto
-        # o arquivo já estava em 60s/30s.
+        # Read from the file instead of repeating the values here: duplicating
+        # them once left the intervals out of sync, with the wizard writing
+        # 10s/5s while the file was already at 60s/30s.
         { echo "$marker"; cat "$REPO_ROOT/observability/claude-telemetry.sh"; } >> "$rc"
         echo "  telemetry env vars adicionadas a $rc (abra um terminal novo, ou 'source $rc')"
       else
@@ -387,13 +385,13 @@ wizard_observability() {
 
 cmd_wizard() {
   echo "agent-setup wizard — monte seu ambiente Claude Code"
-  echo "Cada item é opcional; pra cada um escolhido você decide global ou por-projeto."
+  echo "Every item is optional; for each one you pick, you choose global or per-project."
   echo
 
   wizard_bundle
   wizard_mcp
   wizard_rtk
-  wizard_plugin "ponytail (evita over-engineering, prefere stdlib/soluções nativas)" \
+  wizard_plugin "ponytail (avoids over-engineering, prefers stdlib/native solutions)" \
     "DietrichGebert/ponytail" "ponytail@ponytail"
   wizard_plugin "caveman (respostas ultra-comprimidas, corta ~65% dos tokens de output)" \
     "JuliusBrussee/caveman" "caveman@caveman"
@@ -406,7 +404,7 @@ cmd_wizard() {
   wizard_observability
 
   echo
-  echo "wizard concluído."
+  echo "wizard done."
 }
 
 # --- entrypoint ---------------------------------------------------------------
