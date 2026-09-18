@@ -473,6 +473,16 @@ docker compose down -v        # stop, wipe everything
 
 ## Known traps
 
+**A published series needs a lookback window, not `$__interval`.** The rate series
+is published every 5 minutes. Querying it with `last_over_time(... [$__interval])`
+looks back only as far as the graph's own step, which on a wide panel is 30s — so
+19 steps out of 20 find nothing. Grafana then declares the frame's interval as 30s,
+sees points 300s apart, and inserts nulls between them; with `spanNulls: false` and
+`showPoints: never`, the entire line disappears while the tooltip still reports
+values. The fix is a fixed `[10m]` window (always covers at least two published
+points) plus `interval: 5m` on the panel so Grafana does not over-sample a series
+that only has 5-minute resolution.
+
 **A timeseries with no explicit color inherits the thresholds.** Grafana's default
 field color mode is `thresholds`, so the line takes the colour of whichever band
 its value falls in. With a transparent base step — used here so the threshold band

@@ -1067,7 +1067,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [$__interval]) by (user_email))",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email))",
           "queryType": "range",
           "hide": false,
           "legendFormat": "tokens/hour"
@@ -1142,7 +1142,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "interval": "5m"
     },
     {
       "id": 9,
@@ -1166,7 +1167,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_input [$__interval]) by (user_email))",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_input [10m]) by (user_email))",
           "queryType": "range",
           "hide": false,
           "legendFormat": "input"
@@ -1178,7 +1179,7 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_output [$__interval]) by (user_email))",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate_output [10m]) by (user_email))",
           "queryType": "range",
           "hide": false,
           "legendFormat": "output"
@@ -1324,7 +1325,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "interval": "5m"
     }
   ]
 }
