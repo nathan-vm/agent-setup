@@ -1107,11 +1107,11 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "transparent",
+                "color": "text",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "green",
                 "value": 766008
               },
               {
@@ -1119,10 +1119,6 @@
                 "value": 1721058
               }
             ]
-          },
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "text"
           }
         },
         "overrides": []

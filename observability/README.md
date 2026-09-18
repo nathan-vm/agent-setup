@@ -419,8 +419,17 @@ days, as quantiles of the very same smoothed curve the panel draws:
 
 | Line | What it is | What it means |
 |---|---|---|
-| yellow | P75 | Above it you are in the busiest quarter of your own normal. |
+| green | P75 | Above it you are in the busiest quarter of your own normal. |
 | orange | Q3 + 1.5×IQR (Tukey's fence) | Above it is not "busy", it is atypical. Worth looking at what ran there. |
+
+**The curve itself changes colour with the band it is in**: white below P75 (your
+usual pace), green between the cutlines (working hard), orange above the fence
+(atypical). Measured over 7 days here it reads 97.2% white, 2.0% green, 0.8%
+orange — most of a week is idle or coasting down, and the cutlines are quantiles
+of *working* time, so the colours only light up while you are actually going.
+
+The input/output panel keeps fixed per-series colours instead (blue and purple),
+because there colour has to tell the two series apart.
 
 They are computed **only over buckets that actually contained requests**. An EWMA
 never quite reaches zero, so after a busy stretch it leaves a long tail of small
@@ -483,14 +492,14 @@ values. The fix is a fixed `[10m]` window (always covers at least two published
 points) plus `interval: 5m` on the panel so Grafana does not over-sample a series
 that only has 5-minute resolution.
 
-**A timeseries with no explicit color inherits the thresholds.** Grafana's default
-field color mode is `thresholds`, so the line takes the colour of whichever band
-its value falls in. With a transparent base step — used here so the threshold band
-does not tint the chart — every value below the first cutline is drawn invisible.
-The rate panel looked completely blank while its tooltip still showed values, and
-it only surfaced once the curve was smoothed: the old spiky one crossed the
-cutline constantly, so fragments stayed visible. Any timeseries with a transparent
-base step needs an explicit `color.mode: fixed`.
+**A transparent base threshold makes the line invisible.** Grafana's default field
+color mode is `thresholds`, so the line takes the colour of whichever band its
+value falls in — which the rate panel relies on. But the base step must be a real
+colour. It used to be `transparent` (so the threshold band would not tint the
+chart), which drew every value below the first cutline as nothing at all. The panel
+looked blank while its tooltip still showed values, and it only surfaced once the
+curve was smoothed: the old spiky one crossed the cutline constantly, so coloured
+fragments stayed visible.
 
 **`allowUiUpdates` must be `false`.** With `true`, the first time a dashboard is
 touched through the UI, Grafana unlinks it from provisioning (`meta.provisioned`
