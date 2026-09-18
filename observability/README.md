@@ -424,8 +424,17 @@ days, as quantiles of the very same smoothed curve the panel draws:
 | red | Q3 + 3×IQR (Tukey's outer fence) | The textbook "far out" point. Worth looking at what ran there. |
 
 **The curve itself changes colour with the band it is in**: white below P75 (your
-usual pace), green, orange, red. That per-point colouring needs
-`custom.gradientMode: "scheme"` on the panel (see the pitfall below).
+usual pace), green, orange, red.
+
+The colouring is not a gradient. The panel draws the same curve four times: a
+white base, then one series per band filtered in LogQL to the samples above
+that band's cutline (`sum(...) > 986651`). A comparison in LogQL drops the
+samples that fail it, so with `spanNulls: false` each overlay renders only the
+stretch that actually crossed, in one flat colour, and the cutline the query
+filters on is the same number the dashed line is drawn at. The overlays carry
+points as well as a line, because a crossing that lasts a single 5-minute
+bucket has no segment to draw; they are hidden from the legend and the tooltip,
+being the same curve recut.
 
 There are three cutlines rather than two because with a single fence the top band
 ran from the fence all the way to the maximum — a 3.3x span on real data, so a
@@ -516,15 +525,16 @@ looked blank while its tooltip still showed values, and it only surfaced once th
 curve was smoothed: the old spiky one crossed the cutline constantly, so coloured
 fragments stayed visible.
 
-**`gradientMode` decides whether the colour follows the value or the series.**
-`color.mode: thresholds` alone is not enough to paint a line by band. With
-`gradientMode: "opacity"` Grafana resolves the field's colour **once for the whole
-series** — from its display value — and draws every point in it, so the rate curve
-came out uniformly green no matter how many peaks crossed the cutlines. Only
-`gradientMode: "scheme"` evaluates the thresholds **per point along the line**,
-which is what makes a crossing visible. The symptom is easy to misread as "the
-data never crosses": check the numbers first, with the panel's own query.
-
+**Colouring a line by threshold band is not what `color.mode: thresholds` does.**
+Two modes both look right and are both wrong. With `gradientMode: "opacity"`
+Grafana resolves the field colour **once for the whole series**, so the rate
+curve came out uniformly green no matter how many peaks crossed the cutlines.
+With `gradientMode: "scheme"` it colours per point, but as a *gradient*: it
+interpolates between the threshold colours instead of stepping at them, so the
+curve turns into a rainbow and a point still well below the red cutline is
+already drawn reddish. Neither mode paints "the part of the line above the
+line". Overlaying one filtered series per band does, which is what this panel
+now uses, at the cost of one extra query per band.
 
 **`allowUiUpdates` must be `false`.** With `true`, the first time a dashboard is
 touched through the UI, Grafana unlinks it from provisioning (`meta.provisioned`

@@ -324,7 +324,13 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
       if (!target.expr) continue;
       target.expr = target.expr
         .replaceAll('__EXPORTER_STREAM__', EXPORTER_STREAM)
-        .replaceAll('__HALFLIFE__', RATE_HALFLIFE);
+        .replaceAll('__HALFLIFE__', RATE_HALFLIFE)
+        // The rate panel draws one series per band, each filtered in LogQL to the
+        // samples above its own cutline, so the cutlines have to reach the query
+        // too -- not only the threshold steps that draw the dashed lines.
+        .replaceAll('__CUT_P75__', String(cutlines.total.p75))
+        .replaceAll('__CUT_OUTLIER__', String(cutlines.total.outlier))
+        .replaceAll('__CUT_EXTREME__', String(cutlines.total.extreme));
     }
   }
 

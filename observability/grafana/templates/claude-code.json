@@ -1071,6 +1071,42 @@
           "queryType": "range",
           "hide": false,
           "legendFormat": "tokens/hour"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email)) > __CUT_P75__",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "above P75"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email)) > __CUT_OUTLIER__",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "outlier"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(last_over_time({service_name=\"claude-code-rate\", halflife=\"__HALFLIFE__\"} | user_email =~ `$account` | unwrap rate [10m]) by (user_email)) > __CUT_EXTREME__",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "far out"
         }
       ],
       "fieldConfig": {
@@ -1080,12 +1116,12 @@
             "drawStyle": "line",
             "lineInterpolation": "linear",
             "lineWidth": 2,
-            "fillOpacity": 15,
-            "gradientMode": "scheme",
+            "fillOpacity": 0,
+            "gradientMode": "none",
             "showPoints": "never",
             "pointSize": 5,
             "axisPlacement": "auto",
-            "axisLabel": "tokens / hora",
+            "axisLabel": "tokens / hour",
             "spanNulls": false,
             "scaleDistribution": {
               "type": "linear"
@@ -1123,9 +1159,119 @@
                 "value": 2676108
               }
             ]
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 5
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 5
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "D"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "always"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 5
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
