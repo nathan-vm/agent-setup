@@ -420,15 +420,27 @@ days, as quantiles of the very same smoothed curve the panel draws:
 | Line | What it is | What it means |
 |---|---|---|
 | green | P75 | Above it you are in the busiest quarter of your own normal. |
-| red | Q3 + 1.5×IQR (Tukey's fence) | Above it is not "busy", it is atypical. Worth looking at what ran there. |
+| orange | Q3 + 1.5×IQR (Tukey's inner fence) | Not "busy" any more — out of pattern. |
+| red | Q3 + 3×IQR (Tukey's outer fence) | The textbook "far out" point. Worth looking at what ran there. |
 
 **The curve itself changes colour with the band it is in**: white below P75 (your
-usual pace), green between the cutlines (working hard), red above the fence
-(atypical). Red rather than orange because with two cutlines this is the top band
-— there is nothing worse for it to escalate into. Measured over 7 days here it
-reads 97.2% white, 2.0% green, 0.8% red — most of a week is idle or coasting down,
-and the cutlines are quantiles of *working* time, so the colours only light up
-while you are actually going.
+usual pace), green, orange, red.
+
+There are three cutlines rather than two because with a single fence the top band
+ran from the fence all the way to the maximum — a 3.3x span on real data, so a
+mild peak and an extreme one were painted the same colour and the top band stopped
+meaning anything. Tukey defines both fences, so the second one is not an invented
+threshold: 1.5×IQR is an outlier, 3×IQR is "far out".
+
+Measured over 7 days, on two accounts:
+
+| | white | green | orange | red | top band span |
+|---|---|---|---|---|---|
+| personal | 90.3% | 7.0% | 1.5% | 1.2% | 2.3× (was 3.3×) |
+| work | 92.1% | 6.5% | 1.2% | 0.2% | 1.0× (was 3.3×) |
+
+Most of a week is idle or coasting down, and the cutlines are quantiles of
+*working* time, so the colours only light up while you are actually going.
 
 The input/output panel keeps fixed per-series colours instead (blue and purple),
 because there colour has to tell the two series apart.

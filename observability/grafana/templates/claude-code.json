@@ -1115,8 +1115,12 @@
                 "value": 766008
               },
               {
-                "color": "red",
+                "color": "orange",
                 "value": 1721058
+              },
+              {
+                "color": "red",
+                "value": 2676108
               }
             ]
           }

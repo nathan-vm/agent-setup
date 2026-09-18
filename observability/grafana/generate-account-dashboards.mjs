@@ -59,7 +59,7 @@ const outDir = join(here, 'dashboards', 'accounts');
 // the line at 782k under a curve whose real P75 was 1.09M — a line that lies.
 const RATE_HALFLIFE = process.env.RATE_HALFLIFE || '20m';
 // Used when an account has too little history for statistics of its own.
-const CUTLINE_FALLBACK = { p75: 766_008, outlier: 1_721_058 };
+const CUTLINE_FALLBACK = { p75: 766_008, outlier: 1_721_058, extreme: 2_676_108 };
 
 function slug(email) {
   return email.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -109,8 +109,14 @@ function quantile(sorted, q) {
 // Cutlines for the rate panels, over the account's last 7 days:
 //
 //   p75      — above it, the account is in the busiest quarter of its own normal.
-//   outlier  — Tukey's upper fence (Q3 + 1.5×IQR). Above it is not "busy", it is
-//              atypical.
+//   outlier  — Tukey's inner fence (Q3 + 1.5×IQR). Above it is not "busy", it is
+//              out of pattern.
+//   extreme  — Tukey's outer fence (Q3 + 3×IQR), the textbook "far out" point.
+//
+// Three cutlines rather than two because with only one fence the top band ran from
+// the fence all the way to the maximum — on real data a 3.3x span, so a mild peak
+// and an extreme one were painted the same colour and the top band stopped meaning
+// anything.
 //
 // Idle periods are dropped: including zeros would pull the quantiles down and the
 // line would only mean "is using", not "is using a lot".
@@ -156,7 +162,12 @@ async function rateCutlines(email, field = 'rate') {
     if (values.length < 20) return { ...CUTLINE_FALLBACK, fallback: true };
     const q1 = quantile(values, 0.25);
     const q3 = quantile(values, 0.75);
-    return { p75: Math.round(q3), outlier: Math.round(q3 + 1.5 * (q3 - q1)) };
+    const iqr = q3 - q1;
+    return {
+      p75: Math.round(q3),
+      outlier: Math.round(q3 + 1.5 * iqr),
+      extreme: Math.round(q3 + 3 * iqr),
+    };
   } catch (error) {
     console.error(`cutlines for ${email} unavailable (${error.message}); using defaults`);
     return { ...CUTLINE_FALLBACK, fallback: true };
@@ -269,10 +280,14 @@ function replaceVariable(dashboard, variable) {
 // transparent base and stays untouched; panels without cutlines only have that
 // step and are skipped.
 function applyCutlines(dashboard, byName) {
+  // Writes as many cutlines as the panel declares steps for, so a panel can carry
+  // two bands or three without the generator needing to know which is which.
   const write = (steps, cutlines) => {
-    if (!Array.isArray(steps) || steps.length < 3 || !cutlines) return;
-    steps[1] = { ...steps[1], value: cutlines.p75 };
-    steps[2] = { ...steps[2], value: cutlines.outlier };
+    if (!Array.isArray(steps) || !cutlines) return;
+    const values = [cutlines.p75, cutlines.outlier, cutlines.extreme];
+    for (let i = 1; i < steps.length && i <= values.length; i += 1) {
+      if (values[i - 1] !== undefined) steps[i] = { ...steps[i], value: values[i - 1] };
+    }
   };
   for (const panel of allPanels(dashboard)) {
     if (panel.type !== 'timeseries') continue;
@@ -298,8 +313,9 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
       ? 'Rate cutlines: DEFAULT values (not enough history, or Loki unavailable), '
         + 'not computed from this account.'
       : `Rate cutlines, over this account's last 7 days: P75 `
-        + `${cutlines.total.p75.toLocaleString('en-US')} and outlier `
-        + `${cutlines.total.outlier.toLocaleString('en-US')} tokens/h.`);
+        + `${cutlines.total.p75.toLocaleString('en-US')}, outlier `
+        + `${cutlines.total.outlier.toLocaleString('en-US')}, extreme `
+        + `${cutlines.total.extreme.toLocaleString('en-US')} tokens/h.`);
   replaceVariable(dashboard, accountVariable(email));
   applyCutlines(dashboard, cutlines);
 
@@ -392,6 +408,7 @@ async function main() {
     console.log(
       `${email}  ->  total cutlines P75 ${total.p75.toLocaleString('en-US')}`
       + ` / outlier ${total.outlier.toLocaleString('en-US')} tokens/h`
+      + ` / extreme ${total.extreme.toLocaleString('en-US')}`
       + `, ${servers.length} MCP server(s), ${owners.length} skill owner(s)`
       + `, limits ${accountLimits.block_5h.toLocaleString('en-US')}/5h `
       + `and ${accountLimits.week.toLocaleString('en-US')}/week`,
