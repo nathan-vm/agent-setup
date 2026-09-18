@@ -1,7 +1,0 @@
-# Dashboards por conta gerados por generate-account-dashboards.mjs.
-# São derivados do mestre e específicos dos emails desta máquina — não versionar.
-grafana/dashboards/accounts/
-
-# Limites e lista de contas ignoradas. Contém emails, mesma razão acima.
-# O modelo versionado é grafana/account-limits.example.json.
-grafana/account-limits.json

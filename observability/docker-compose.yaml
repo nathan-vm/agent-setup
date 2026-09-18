@@ -114,9 +114,9 @@ services:
   # ferramenta com o nome REAL (mcp__<servidor>__<tool>), que a telemetria OTel
   # redige. E a unica fonte possivel para atribuir tokens por servidor MCP.
   #
-  # Os diretorios de config do Claude Code no host entram como subpastas de
-  # /transcripts, somente-leitura. Sao dois porque e comum ter contas separadas
-  # por contexto (pessoal e trabalho) - ver CLAUDE_DIR_A/B no .env.
+  # As pastas de config do Claude Code entram como subpastas de /transcripts,
+  # somente-leitura. Quem tem contas separadas por contexto (pessoal e trabalho)
+  # tem mais de uma pasta - ver .env.example.
   transcript-exporter:
     image: node:22-alpine
     environment:
@@ -133,10 +133,11 @@ services:
       - EXPORTER_STREAM=${EXPORTER_STREAM:?defina EXPORTER_STREAM no .env}
     volumes:
       - ./transcript-exporter:/work:ro
-      # Cada diretório de config entra como uma subpasta de /transcripts; o
-      # exporter varre a raiz recursivamente. Ver CLAUDE_DIR_* no .env.
-      - ${CLAUDE_DIR_A:?defina CLAUDE_DIR_A no .env}/projects:/transcripts/a:ro
-      - ${CLAUDE_DIR_B:?defina CLAUDE_DIR_B no .env}/projects:/transcripts/b:ro
+      # Uma pasta de config por subpasta de /transcripts; o exporter varre a raiz
+      # recursivamente. Esta e a padrao; para varrer mais de uma, um
+      # docker-compose.override.yml acrescenta as demais como d1, d2, ... (o
+      # wizard gera esse arquivo). Ver .env.example.
+      - ${CLAUDE_DIR:-$HOME/.claude}/projects:/transcripts/d0:ro
       - exporter-state:/state
     working_dir: /work
     command: ["node", "/work/exporter.mjs"]

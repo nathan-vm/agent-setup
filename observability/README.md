@@ -22,30 +22,62 @@ ferramentas MCP e o consumo nas janelas de limite reais.
 
 ## Subir
 
+O caminho mais curto é o wizard. Ele **descobre sozinho** as pastas de config do
+Claude Code, identifica a conta de cada uma, pergunta quais você quer monitorar,
+escreve a configuração e liga a telemetria no shell certo:
+
+```sh
+bin/agent-setup
+```
+
+Na mão:
+
 ```sh
 cd observability
+cp .env.example .env     # ajuste CLAUDE_DIR
 docker compose up -d
 ```
 
-Os diretórios de config do Claude Code a varrer ficam no `.env`
-(`CLAUDE_DIR_A` e `CLAUDE_DIR_B`). São **dois** porque é comum ter contas
-separadas por contexto — `~/.claude-personal` e `~/.claude-work`, por exemplo —
-e cada uma tem seus próprios transcripts. Se você só usa um, aponte os dois para
-o mesmo caminho: a deduplicação cuida da leitura repetida.
+### Mais de uma conta
 
-Varrer só um diretório é uma falha silenciosa: nada quebra, os painéis
+É comum ter contas separadas por contexto (`~/.claude-personal`,
+`~/.claude-work`), cada uma com sua própria pasta de transcripts. A primeira vem
+de `CLAUDE_DIR` no `.env`; as demais entram num `docker-compose.override.yml`,
+montadas em `/transcripts/d1`, `d2`, … — o exporter varre a raiz recursivamente:
+
+```yaml
+services:
+  transcript-exporter:
+    volumes:
+      - ${HOME}/.claude-work/projects:/transcripts/d1:ro
+```
+
+O wizard gera esse arquivo quando você escolhe mais de uma pasta, e ainda põe as
+contas que você NÃO escolheu na lista `ignorar` do `account-limits.json` — senão
+elas ganhariam um dashboard vazio assim que aparecessem no Prometheus.
+
+Nem o `.env` nem o `docker-compose.override.yml` são versionados: apontam para
+caminhos desta máquina. Os modelos são `.env.example` e este README.
+
+Varrer só uma pasta é uma **falha silenciosa**: nada quebra, os painéis
 simplesmente mostram uma fração do uso. Aqui faltavam 331 chamadas de um único
 servidor MCP — o painel dizia 4 mil tokens onde o real era 268 mil.
 
 ## Ligar a telemetria em toda sessão
 
+O wizard já faz isso, escolhendo o arquivo certo para o seu shell. Na mão, da
+raiz do repo:
+
 ```sh
-cd ..   # se você ainda está em observability/, volte para a raiz do repo
-cat observability/claude-telemetry.fish >> ~/.config/fish/config.fish
+cat observability/claude-telemetry.sh   >> ~/.bashrc                    # bash
+cat observability/claude-telemetry.sh   >> ~/.zshrc                     # zsh
+cat observability/claude-telemetry.fish >> ~/.config/fish/config.fish   # fish
 ```
 
-Abra um terminal novo (ou `source ~/.config/fish/config.fish`). O primeiro ponto
-chega em ~10s do primeiro prompt. Conferir: `claude --debug` sem erros de
+Os dois arquivos têm os mesmos valores — mudou um, mude o outro.
+
+Abra um terminal novo (ou dê `source` no arquivo). O primeiro ponto chega em até
+1min do primeiro prompt (é o intervalo de envio; ver "Consumo de recursos"). Conferir: `claude --debug` sem erros de
 `[3P telemetry]`; no Prometheus, `claude_code_cost_usage_USD_total` retorna séries.
 
 ---
