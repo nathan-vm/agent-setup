@@ -1119,6 +1119,10 @@
                 "value": 1721058
               }
             ]
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
           }
         },
         "overrides": []

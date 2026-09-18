@@ -473,6 +473,15 @@ docker compose down -v        # stop, wipe everything
 
 ## Known traps
 
+**A timeseries with no explicit color inherits the thresholds.** Grafana's default
+field color mode is `thresholds`, so the line takes the colour of whichever band
+its value falls in. With a transparent base step — used here so the threshold band
+does not tint the chart — every value below the first cutline is drawn invisible.
+The rate panel looked completely blank while its tooltip still showed values, and
+it only surfaced once the curve was smoothed: the old spiky one crossed the
+cutline constantly, so fragments stayed visible. Any timeseries with a transparent
+base step needs an explicit `color.mode: fixed`.
+
 **`allowUiUpdates` must be `false`.** With `true`, the first time a dashboard is
 touched through the UI, Grafana unlinks it from provisioning (`meta.provisioned`
 goes `false`) and serves the database copy forever — the file changes and nothing
