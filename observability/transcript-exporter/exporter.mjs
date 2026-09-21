@@ -188,10 +188,39 @@ function parseToolName(name) {
   return { toolSource: 'mcp', mcpServer: rest.slice(0, sep), mcpTool: rest.slice(sep + 2) };
 }
 
+// Splits on top-level &&, ||, ; and | — but NOT inside single/double/backtick
+// quotes. Without this, a quoted inline script (`node -e 'if (x) { ... }'`)
+// gets torn apart on every `;` and `|` INSIDE the quotes, producing a "command"
+// per JS statement (`if`, `for`, `console.log(...)`, …) instead of treating the
+// whole call as one `node` invocation. Still not a full shell grammar — escaped
+// quotes and $(...) subshells aren't handled — but this covers the common case.
+function splitTopLevel(str) {
+  const segments = [];
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < str.length; i += 1) {
+    const ch = str[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '&' && str[i + 1] === '&') { segments.push(current); current = ''; i += 1; continue; }
+    if (ch === '|' && str[i + 1] === '|') { segments.push(current); current = ''; i += 1; continue; }
+    if (ch === ';' || ch === '|') { segments.push(current); current = ''; continue; }
+    current += ch;
+  }
+  segments.push(current);
+  return segments;
+}
+
 // Names every sub-command in a Bash `command` string, so `git status && ls -la`
-// attributes tokens to both `git` and `ls`, not just the first. Not a full shell
-// parser — a best-effort split on top-level separators is enough for
-// classification and keeps this from growing into a shell grammar.
+// attributes tokens to both `git` and `ls`, not just the first.
 //
 // The `rtk` PreToolUse hook installed on this machine rewrites recognized
 // commands before they execute (`git status` -> `rtk git status`), and
@@ -201,7 +230,7 @@ function parseToolName(name) {
 // (unrecognized, or already prefixed) is used as-is.
 function extractBashCommands(commandStr) {
   if (!commandStr) return [];
-  const segments = commandStr.split(/&&|\|\||;|\|/);
+  const segments = splitTopLevel(commandStr);
   const names = [];
   for (const segment of segments) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
