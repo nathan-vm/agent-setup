@@ -853,6 +853,135 @@
       ]
     },
     {
+      "id": 14,
+      "type": "table",
+      "title": "Tokens by Bash command",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 9,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (mcp_tool) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"tools\"} | user_email =~ `$account` | tool_source = `builtin` | mcp_server = `bash` | unwrap tokens_attributed [$__range]))",
+          "queryType": "range",
+          "hide": false,
+          "legendFormat": "{{mcp_tool}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Command"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Break down ${__value.text}",
+                    "url": "/d/__DASHBOARD__/?var-server=bash&viewPanel=panel-11&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tokens"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "Tokens"
+          ],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Tokens",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "reducers": [
+              "lastNotNull"
+            ],
+            "mode": "seriesToRows"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {
+              "Field": "Command",
+              "Last": "Tokens",
+              "Last *": "Tokens"
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": 7,
       "type": "piechart",
       "title": "Tokens by source",
@@ -861,8 +990,8 @@
         "uid": "loki"
       },
       "gridPos": {
-        "x": 16,
-        "y": 9,
+        "x": 8,
+        "y": 19,
         "w": 8,
         "h": 10
       },
@@ -1313,7 +1442,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 19,
+        "y": 29,
         "w": 24,
         "h": 1
       }
@@ -1325,7 +1454,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 30,
         "w": 24,
         "h": 1
       }
@@ -1340,7 +1469,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 31,
         "w": 24,
         "h": 9
       },
@@ -1562,7 +1691,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 30,
+        "y": 40,
         "w": 24,
         "h": 9
       },
