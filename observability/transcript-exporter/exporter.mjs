@@ -188,35 +188,54 @@ function parseToolName(name) {
   return { toolSource: 'mcp', mcpServer: rest.slice(0, sep), mcpTool: rest.slice(sep + 2) };
 }
 
-// Splits on top-level &&, ||, ; and | — but NOT inside single/double/backtick
-// quotes. Without this, a quoted inline script (`node -e 'if (x) { ... }'`)
-// gets torn apart on every `;` and `|` INSIDE the quotes, producing a "command"
-// per JS statement (`if`, `for`, `console.log(...)`, …) instead of treating the
-// whole call as one `node` invocation. Still not a full shell grammar — escaped
-// quotes and $(...) subshells aren't handled — but this covers the common case.
-function splitTopLevel(str) {
-  const segments = [];
-  let current = '';
+// Tokenizes a shell command into words, grouped into top-level segments split
+// on &&, ||, ; and |. Quotes ('...', "...", `...`) and parens — which is what
+// makes a $(...) substitution or (...) subshell — make their contents atomic:
+// no word-splitting and no operator-splitting happens inside them. Doing both
+// jobs (segmenting AND word-splitting) in one pass is what makes
+// `FROM=$(date -v-6d +%F || date -d '...')` come out as ONE atomic word
+// (`FROM=$(...)`) instead of four bogus fragments (`+%F)`, `-v-6d`, ...): if
+// these were split separately, the leading `FROM=` would get skipped as an
+// env assignment and the next fragment of the SAME substitution would be
+// mistaken for a second command. Still not a full shell grammar — backslash
+// escapes aren't handled — but this covers the constructs that actually
+// showed up in real commands (confirmed against live transcripts).
+function tokenizeShell(str) {
+  const segments = [[]];
+  let word = '';
   let quote = null;
+  let depth = 0;
+  const endWord = () => { if (word) segments.at(-1).push(word); word = ''; };
   for (let i = 0; i < str.length; i += 1) {
     const ch = str[i];
     if (quote) {
-      current += ch;
+      word += ch;
       if (ch === quote) quote = null;
       continue;
     }
-    if (ch === '"' || ch === "'" || ch === '`') {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === '&' && str[i + 1] === '&') { segments.push(current); current = ''; i += 1; continue; }
-    if (ch === '|' && str[i + 1] === '|') { segments.push(current); current = ''; i += 1; continue; }
-    if (ch === ';' || ch === '|') { segments.push(current); current = ''; continue; }
-    current += ch;
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; word += ch; continue; }
+    if (ch === '(') { depth += 1; word += ch; continue; }
+    if (ch === ')') { depth = Math.max(0, depth - 1); word += ch; continue; }
+    if (depth > 0) { word += ch; continue; }
+    if (/\s/.test(ch)) { endWord(); continue; }
+    if (ch === '&' && str[i + 1] === '&') { endWord(); segments.push([]); i += 1; continue; }
+    if (ch === '|' && str[i + 1] === '|') { endWord(); segments.push([]); i += 1; continue; }
+    if (ch === ';' || ch === '|') { endWord(); segments.push([]); continue; }
+    word += ch;
   }
-  segments.push(current);
+  endWord();
   return segments;
+}
+
+// A plausibility check for "does this look like an executable name or path" —
+// not a shell-grammar fragment (redirect target, glob, unbalanced quote/paren
+// remnant). Conservative on purpose: reject anything starting with a
+// non-word character, or containing a character no real command name has
+// ($, `, ", ', *, (, ), %, <, >, &, ;). Better to silently drop one call's
+// attribution than mislabel it and pollute the breakdown with shell debris —
+// this is the safety net for whatever tokenizeShell still gets wrong.
+function looksLikeCommandName(name) {
+  return /^[A-Za-z0-9_][A-Za-z0-9_.\/@:-]*$/.test(name);
 }
 
 // Names every sub-command in a Bash `command` string, so `git status && ls -la`
@@ -230,17 +249,17 @@ function splitTopLevel(str) {
 // (unrecognized, or already prefixed) is used as-is.
 function extractBashCommands(commandStr) {
   if (!commandStr) return [];
-  const segments = splitTopLevel(commandStr);
   const names = [];
-  for (const segment of segments) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+  for (const tokens of tokenizeShell(commandStr)) {
     let i = 0;
-    // skip leading env-var assignments, e.g. `FOO=bar git status`
-    while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i += 1;
+    // skip leading env-var assignments (`FOO=bar git status`) and bare
+    // line-continuation backslashes (`&& \<newline>git status`, common in
+    // multi-line one-liners) — neither is the command itself.
+    while (i < tokens.length && (tokens[i] === '\\' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]))) i += 1;
     if (i >= tokens.length) continue;
     let name = tokens[i];
     if (name === 'rtk' && i + 1 < tokens.length) name = tokens[i + 1];
-    if (name) names.push(name);
+    if (name && looksLikeCommandName(name)) names.push(name);
   }
   return names;
 }
