@@ -188,6 +188,37 @@ function parseToolName(name) {
   return { toolSource: 'mcp', mcpServer: rest.slice(0, sep), mcpTool: rest.slice(sep + 2) };
 }
 
+// str[i] and str[i+1] are the '<<' of a heredoc redirect. Finds where its
+// BODY ends (a line that is exactly the delimiter, optionally indented when
+// the redirect is '<<-'), so the caller can skip straight past it. Returns
+// null when this isn't actually a heredoc (e.g. a bare '<<' with no
+// delimiter word, or one whose closing line never appears — the latter can
+// legitimately happen if the command got truncated for logging, in which
+// case treating the remainder as ordinary text is the safer fallback).
+function heredocEnd(str, i) {
+  let j = i + 2;
+  if (str[j] === '-') j += 1;
+  while (str[j] === ' ' || str[j] === '\t') j += 1;
+  let delim = '';
+  if (str[j] === '"' || str[j] === "'") {
+    const q = str[j];
+    j += 1;
+    while (j < str.length && str[j] !== q) { delim += str[j]; j += 1; }
+    j += 1;
+  } else {
+    while (j < str.length && /\S/.test(str[j]) && str[j] !== ';' && str[j] !== '&' && str[j] !== '|') {
+      delim += str[j];
+      j += 1;
+    }
+  }
+  if (!delim) return null;
+  const bodyStart = str.indexOf('\n', j);
+  if (bodyStart < 0) return null;
+  const closeRe = new RegExp(`^[ \\t]*${delim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*$`, 'm');
+  const match = closeRe.exec(str.slice(bodyStart + 1));
+  return match ? bodyStart + 1 + match.index + match[0].length : null;
+}
+
 // Tokenizes a shell command into words, grouped into top-level segments split
 // on &&, ||, ; and |. Quotes ('...', "...", `...`) and parens — which is what
 // makes a $(...) substitution or (...) subshell — make their contents atomic:
@@ -197,9 +228,17 @@ function parseToolName(name) {
 // (`FROM=$(...)`) instead of four bogus fragments (`+%F)`, `-v-6d`, ...): if
 // these were split separately, the leading `FROM=` would get skipped as an
 // env assignment and the next fragment of the SAME substitution would be
-// mistaken for a second command. Still not a full shell grammar — backslash
-// escapes aren't handled — but this covers the constructs that actually
-// showed up in real commands (confirmed against live transcripts).
+// mistaken for a second command.
+//
+// A heredoc (`<<'EOF' ... EOF`) gets the same atomic treatment for its whole
+// body, found via heredocEnd — without it, every `;`/`|` inside a commit
+// message or an inline script leaks out as a fake segment boundary, and
+// whatever keyword starts a line inside it (if/for/const/...) leaks out as a
+// bogus "command". Confirmed live: this was the source of most of the
+// garbage still showing up after the quote/paren fix alone.
+//
+// Still not a full shell grammar — backslash escapes aren't handled — but
+// this covers the constructs that actually showed up in real commands.
 function tokenizeShell(str) {
   const segments = [[]];
   let word = '';
@@ -217,6 +256,19 @@ function tokenizeShell(str) {
     if (ch === '(') { depth += 1; word += ch; continue; }
     if (ch === ')') { depth = Math.max(0, depth - 1); word += ch; continue; }
     if (depth > 0) { word += ch; continue; }
+    if (ch === '<' && str[i + 1] === '<') {
+      const end = heredocEnd(str, i);
+      if (end !== null) { word += str.slice(i, end); i = end - 1; continue; }
+    }
+    // `\` right before a newline is a line continuation: real shell removes
+    // both characters and joins the two lines with nothing between them, so
+    // this must NOT become a stray token or a segment break.
+    if (ch === '\\' && str[i + 1] === '\n') { i += 1; continue; }
+    // Any OTHER bare newline is a statement separator, same as `;` — most
+    // multi-line Bash calls are one command per line with no explicit `&&`
+    // between them, and without this only the first line's command was ever
+    // seen (everything after was folded into it as "arguments").
+    if (ch === '\n') { endWord(); segments.push([]); continue; }
     if (/\s/.test(ch)) { endWord(); continue; }
     if (ch === '&' && str[i + 1] === '&') { endWord(); segments.push([]); i += 1; continue; }
     if (ch === '|' && str[i + 1] === '|') { endWord(); segments.push([]); i += 1; continue; }
@@ -227,15 +279,28 @@ function tokenizeShell(str) {
   return segments;
 }
 
+// Shell reserved words: syntax, never a command in their own right. Common
+// and legitimate (`for f in *; do ...; done`, `if x; then ...; fi`) — the `;`
+// separating them from the next clause is real shell grammar, not command
+// chaining, so tokenizeShell correctly segments on it, but that leaves each
+// keyword as a segment's first word. Confirmed live: "for"/"if"/"then"/"do"
+// were among the most frequent bogus names once the heredoc/paren issues
+// were fixed.
+const SHELL_KEYWORDS = new Set([
+  'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done',
+  'case', 'esac', 'function', 'select', 'in', 'time',
+]);
+
 // A plausibility check for "does this look like an executable name or path" —
 // not a shell-grammar fragment (redirect target, glob, unbalanced quote/paren
-// remnant). Conservative on purpose: reject anything starting with a
-// non-word character, or containing a character no real command name has
-// ($, `, ", ', *, (, ), %, <, >, &, ;). Better to silently drop one call's
-// attribution than mislabel it and pollute the breakdown with shell debris —
-// this is the safety net for whatever tokenizeShell still gets wrong.
+// remnant, reserved word). Conservative on purpose: reject anything starting
+// with a non-word character, or containing a character no real command name
+// has ($, `, ", ', *, (, ), %, <, >, &, ;). Better to silently drop one
+// call's attribution than mislabel it and pollute the breakdown with shell
+// debris — this is the safety net for whatever tokenizeShell still gets
+// wrong.
 function looksLikeCommandName(name) {
-  return /^[A-Za-z0-9_][A-Za-z0-9_.\/@:-]*$/.test(name);
+  return !SHELL_KEYWORDS.has(name) && /^[A-Za-z0-9_][A-Za-z0-9_.\/@:-]*$/.test(name);
 }
 
 // Names every sub-command in a Bash `command` string, so `git status && ls -la`
