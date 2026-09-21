@@ -961,7 +961,7 @@
         {
           "id": 11,
           "type": "table",
-          "title": "Tokens by MCP tool",
+          "title": "Tokens by tool",
           "datasource": {
             "type": "loki",
             "uid": "loki"
@@ -980,7 +980,7 @@
                 "uid": "loki"
               },
               "editorMode": "code",
-              "expr": "sum by (mcp_server, mcp_tool) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"tools\"} | user_email =~ `$account` | tool_source = `mcp` | mcp_server =~ `$server` | unwrap tokens_attributed [$__range]))",
+              "expr": "sum by (mcp_server, mcp_tool) (sum_over_time({service_name=\"__EXPORTER_STREAM__\", kind=\"tools\"} | user_email =~ `$account` | tool_source =~ `mcp|builtin` | mcp_tool != `` | mcp_server =~ `$server` | unwrap tokens_attributed [$__range]))",
               "queryType": "range",
               "hide": false,
               "legendFormat": "{{mcp_server}} · {{mcp_tool}}"

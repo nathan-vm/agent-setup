@@ -188,6 +188,34 @@ function parseToolName(name) {
   return { toolSource: 'mcp', mcpServer: rest.slice(0, sep), mcpTool: rest.slice(sep + 2) };
 }
 
+// Names every sub-command in a Bash `command` string, so `git status && ls -la`
+// attributes tokens to both `git` and `ls`, not just the first. Not a full shell
+// parser — a best-effort split on top-level separators is enough for
+// classification and keeps this from growing into a shell grammar.
+//
+// The `rtk` PreToolUse hook installed on this machine rewrites recognized
+// commands before they execute (`git status` -> `rtk git status`), and
+// sometimes remaps them entirely (`cat file` -> `rtk read file`). Without
+// stripping that prefix, almost every Bash call would misclassify as "rtk"
+// instead of the command it actually ran. A command rtk left untouched
+// (unrecognized, or already prefixed) is used as-is.
+function extractBashCommands(commandStr) {
+  if (!commandStr) return [];
+  const segments = commandStr.split(/&&|\|\||;|\|/);
+  const names = [];
+  for (const segment of segments) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    let i = 0;
+    // skip leading env-var assignments, e.g. `FOO=bar git status`
+    while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i += 1;
+    if (i >= tokens.length) continue;
+    let name = tokens[i];
+    if (name === 'rtk' && i + 1 < tokens.length) name = tokens[i + 1];
+    if (name) names.push(name);
+  }
+  return names;
+}
+
 function blockSize(block) {
   const content = block?.content;
   if (typeof content === 'string') return content.length;
@@ -201,34 +229,63 @@ function blockSize(block) {
   return JSON.stringify(content ?? '').length;
 }
 
+// One call's share of the group's input tokens, and the meta fields every
+// record for that call shares regardless of how many rows it fans out into.
+function attribute(call, group, inputTokens, total) {
+  const tokensAttributed = Math.round(
+    total > 0 ? (inputTokens * call.resultBytes) / total : inputTokens / group.calls.length,
+  );
+  return {
+    session_id: group.sessionId,
+    request_id: group.requestId,
+    tool_use_id: call.toolUseId,
+    tool_name: call.toolName,
+    tool_source: call.toolSource,
+    model: group.model,
+    effort: group.effort,
+    query_source: group.isSidechain ? 'subagent' : 'main',
+    git_branch: group.gitBranch,
+    project: group.project,
+    result_bytes: String(call.resultBytes),
+    // Proportional split. With no result bytes at all (every result empty),
+    // split evenly so the total is not lost.
+    tokens_attributed: String(tokensAttributed),
+  };
+}
+
 // Attributes the input tokens of the next assistant message to the tools called
 // in the group, proportionally to each one's result size.
+//
+// A Bash call with recognized sub-commands fans out into one row per
+// occurrence, reusing the mcp_server/mcp_tool slot (mcp_server="bash",
+// mcp_tool=<command>) so it joins the same breakdown table MCP calls already
+// populate, instead of needing a panel of its own. Known tradeoff: a compound
+// line like `git status && ls` attributes the WHOLE call's tokens to both
+// `git` and `ls`, not a split between them — token cost belongs to the LLM
+// turn, not to an individual shell command within it, so this is treated as
+// an acceptable approximation rather than something worth a proportional
+// split of its own.
 function settle(group, inputTokens) {
   const total = group.calls.reduce((sum, call) => sum + call.resultBytes, 0);
-  return group.calls.map((call) => ({
-    timestampNs: `${Date.parse(call.timestamp)}000000`,
-    line: call.toolName,
-    meta: {
-      session_id: group.sessionId,
-      request_id: group.requestId,
-      tool_use_id: call.toolUseId,
-      tool_name: call.toolName,
-      tool_source: call.toolSource,
-      mcp_server: call.mcpServer,
-      mcp_tool: call.mcpTool,
-      model: group.model,
-      effort: group.effort,
-      query_source: group.isSidechain ? 'subagent' : 'main',
-      git_branch: group.gitBranch,
-      project: group.project,
-      result_bytes: String(call.resultBytes),
-      // Proportional split. With no result bytes at all (every result empty),
-      // split evenly so the total is not lost.
-      tokens_attributed: String(
-        Math.round(total > 0 ? (inputTokens * call.resultBytes) / total : inputTokens / group.calls.length),
-      ),
-    },
-  }));
+  return group.calls.flatMap((call) => {
+    const timestampNs = `${Date.parse(call.timestamp)}000000`;
+    const meta = attribute(call, group, inputTokens, total);
+    if (!call.bashCommands?.length) {
+      return [{
+        timestampNs,
+        line: call.toolName,
+        meta: { ...meta, mcp_server: call.mcpServer, mcp_tool: call.mcpTool },
+      }];
+    }
+    return call.bashCommands.map((name, i) => ({
+      timestampNs,
+      line: call.toolName,
+      // Distinct per occurrence: settle() can emit several rows for the same
+      // tool_use_id, and dedup keys on that id otherwise.
+      dedupKey: `bash:${call.toolUseId}:${i}`,
+      meta: { ...meta, mcp_server: 'bash', mcp_tool: name },
+    }));
+  });
 }
 
 // Reads a transcript from the stored offset and returns the finished records.
@@ -308,6 +365,7 @@ async function processTranscript(path, fileState, pluginSkills) {
           toolName: block.name || '',
           resultBytes: 0,
           timestamp: entry.timestamp,
+          bashCommands: block.name === 'Bash' ? extractBashCommands(block.input?.command) : [],
           ...parseToolName(block.name),
         }));
       // A chamada do tool "Skill" traz o nome real no input.
@@ -735,7 +793,8 @@ function summarize(records) {
   const tools = records.filter((record) => record.meta.tool_name);
   const skills = records.filter((record) => record.meta.skill);
   show('TOOLS', tally(tools,
-    (r) => (r.meta.tool_source === 'mcp' ? `mcp:${r.meta.mcp_server}` : `builtin:${r.meta.tool_name}`),
+    (r) => (r.meta.tool_source === 'mcp' ? `mcp:${r.meta.mcp_server}`
+      : r.meta.mcp_tool ? `bash:${r.meta.mcp_tool}` : `builtin:${r.meta.tool_name}`),
     (r) => Number(r.meta.tokens_attributed)));
   show('SKILLS', tally(skills, (r) => r.meta.skill, (r) => Number(r.meta.tokens)));
 }

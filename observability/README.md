@@ -200,6 +200,19 @@ Subagent tracks (`isSidechain`) are tracked separately from the main thread,
 otherwise a subagent's first message would settle the attribution of a tool called
 on the track above.
 
+**Bash calls are broken down by the actual command run** (`git`, `ls`, `glab`,
+…), not left as one opaque `Bash` bucket. This machine has the external `rtk`
+tool wired into a `PreToolUse` hook that rewrites recognized commands before
+they execute — `git status` becomes `rtk git status`, and some are remapped
+entirely (`cat file` → `rtk read file`) — so the exporter strips a leading
+`rtk` token before naming the command, otherwise almost every Bash call would
+show up as "rtk" instead of what it actually ran. A compound line
+(`git status && ls -la`) attributes the call's full tokens to **every**
+sub-command, not a split between them — that is a deliberate over-count in
+exchange for not hiding either command; see `extractBashCommands` and
+`settle` in `transcript-exporter/exporter.mjs`. These rows join the same
+"Tokens by tool" table MCP calls use, under a synthetic `bash` server bucket.
+
 #### About the skill numbers
 
 The skills panel reads the exporter's stream, but the **values come from OTel** —
@@ -339,7 +352,7 @@ This holds as long as the time range is the current week (the default); on anoth
 range the sum becomes that period's.
 
 There is no tool column: the event that accounts for 100% of consumption does not
-carry which tool was used. That cut lives in the "Tokens by MCP tool" table, with
+carry which tool was used. That cut lives in the "Tokens by tool" table, with
 its own attribution.
 
 **The Skill column here is OTel's, redacted.** Unlike the "Tokens by skill" table,
@@ -361,7 +374,7 @@ All three are clickable, and each opens its own table in the collapsed
 
 | Click | Opens | Showing |
 |---|---|---|
-| a server name | **Tokens by MCP tool** | what each specific call of that server cost |
+| a server name | **Tokens by tool** | what each specific call of that server (or Bash command) cost |
 | a skill name | **Tokens by skill, model and effort** | which model and effort that skill ran on |
 | a donut slice | **Tokens by model and effort** | the models behind that origin |
 
