@@ -25,8 +25,8 @@ services:
   # local transcripts.
   #
   # Note: Claude Code redacts MCP names across ALL OTel telemetry — "custom" in
-  # the Prometheus metrics and "mcp_tool" in the tool_result log. The real name
-  # only exists in the transcripts, which is why transcript-exporter exists.
+  # the metrics and "mcp_tool" in the tool_result log. The real name only exists
+  # in the transcripts, which is why transcript-exporter exists.
   loki:
     image: grafana/loki:latest
     command: ["-config.file=/etc/loki/loki-config.yaml"]
@@ -35,20 +35,6 @@ services:
     volumes:
       - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki-data:/loki
-    restart: unless-stopped
-
-  prometheus:
-    image: prom/prometheus:latest
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.retention.time=90d
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    ports:
-      - "127.0.0.1:47909:9090"
-    depends_on:
-      - otel-collector
     restart: unless-stopped
 
   grafana:
@@ -78,7 +64,6 @@ services:
     ports:
       - "127.0.0.1:47300:3000"
     depends_on:
-      - prometheus
       - loki
     restart: unless-stopped
 
@@ -91,9 +76,9 @@ services:
   dashboard-generator:
     image: node:22-alpine
     environment:
-      - PROM_URL=http://prometheus:9090
-      # Required: the generator queries Loki for the per-account P75 and for the
-      # MCP server list. Without it, it silently falls back to defaults.
+      # Required: the generator queries Loki for the account list, the
+      # per-account P75, and the MCP server list. Without it, it silently falls
+      # back to defaults.
       - LOKI_URL=http://loki:3100
       # Comes from .env, shared with transcript-exporter: this is the stream the
       # panels read from. A mismatch between the two makes the dashboard read an
@@ -110,7 +95,6 @@ services:
       - -c
       - "while true; do node /work/grafana/generate-account-dashboards.mjs || echo 'geracao falhou'; sleep 600; done"
     depends_on:
-      - prometheus
       - loki
     restart: unless-stopped
 
@@ -156,7 +140,6 @@ services:
 # metrics and logs, plus the exporter's dedup state. Irreversible, with no extra
 # confirmation. To reset only the exporter, remove just exporter-state (see .env).
 volumes:
-  prometheus-data:
   grafana-data:
   loki-data:
   exporter-state:

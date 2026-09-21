@@ -10,18 +10,13 @@ processors:
   batch: {}
 
 exporters:
-  # Claude Code cost/token metrics -> scraped by Prometheus.
-  prometheus:
-    endpoint: 0.0.0.0:8889
-    resource_to_telemetry_conversion:
-      enabled: true   # turns service.name / user.email / organization.id into labels
-
   debug:
     verbosity: basic
 
-  # Claude Code tool_result/tool_decision events -> Loki, native OTLP ingestion.
-  # This is where real MCP tool/server names live (tool_name = mcp__<server>__<tool>),
-  # unlike the Prometheus metrics where user-configured MCP servers are redacted to "custom".
+  # Claude Code tool_result/tool_decision/api_request events -> Loki, native
+  # OTLP ingestion. This is where real MCP tool/server names live
+  # (tool_name = mcp__<server>__<tool>), unlike the metrics Claude Code used to
+  # also emit, where user-configured MCP servers are redacted to "custom".
   otlphttp/loki:
     endpoint: http://loki:3100/otlp
 
@@ -30,10 +25,15 @@ service:
     metrics:
       level: none
   pipelines:
+    # Metrics are still accepted so nothing breaks if a client sends them, but
+    # there is no backend for them: every panel reads from the logs pipeline
+    # below (Loki), and the only thing metrics used to be for — listing which
+    # accounts exist via Prometheus label_values — is now a Loki query instead
+    # (see discoverAccounts in grafana/generate-account-dashboards.mjs).
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus]
+      exporters: [debug]
     # Traces are still accepted so nothing breaks if a client sends them;
     # they only go to the collector log for now. Wire a real backend when needed.
     traces:

@@ -26,7 +26,6 @@
 //   node observability/grafana/generate-account-dashboards.mjs
 //
 // Environment:
-//   PROM_URL         Prometheus URL (default http://localhost:47909)
 //   LOKI_URL         Loki URL       (default http://localhost:47100)
 //   EXPORTER_STREAM  stream the panels read from (must match transcript-exporter)
 //
@@ -37,7 +36,6 @@ import { readFile, writeFile, mkdir, readdir, unlink, rename } from 'node:fs/pro
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const PROM_URL = process.env.PROM_URL || 'http://localhost:47909';
 const LOKI_URL = process.env.LOKI_URL || 'http://localhost:47100';
 // Must match the transcript-exporter's EXPORTER_STREAM: it is where the MCP and
 // skill panels read from. See the comment at the top of exporter.mjs.
@@ -74,13 +72,23 @@ function escapeRegex(value) {
   return value.replace(/[.+*?()|[\]{}\\^$`]/g, '\\$&');
 }
 
-async function promLabelValues(label) {
-  const url = new URL(`/api/v1/label/${label}/values`, PROM_URL);
+// Which accounts exist. Same query rate-meter.mjs already uses to find every
+// account with telemetry (see publishRate in transcript-exporter/rate-meter.mjs)
+// — an instant query over the raw OTel stream, not the exporter's own
+// tools/skills stream, so an account with plain chat and no tool/skill call
+// still shows up.
+async function discoverAccounts() {
+  const url = new URL('/loki/api/v1/query', LOKI_URL);
+  url.searchParams.set('query',
+    'sum by (user_email) (count_over_time({service_name="claude-code"} '
+    + '| event_name = `api_request` [7d]))');
+  url.searchParams.set('time', String(Math.floor(Date.now() / 1000)));
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`Prometheus answered ${response.status} at ${url}`);
+  if (!response.ok) throw new Error(`Loki answered ${response.status} at ${url}`);
   const body = await response.json();
-  if (body.status !== 'success') throw new Error(`Prometheus status=${body.status}`);
-  return [...new Set((body.data || []).filter(Boolean))].sort();
+  if (body.status !== 'success') throw new Error(`Loki status=${body.status}`);
+  const result = body.data?.result ?? [];
+  return [...new Set(result.map((series) => series.metric?.user_email).filter(Boolean))].sort();
 }
 
 async function lokiQueryRange(query, { hours, stepSeconds }) {
@@ -388,11 +396,12 @@ function scopeAccount(template, email, cutlines, servers, owners, limits) {
 async function main() {
   const template = JSON.parse(await readFile(templatePath, 'utf8'));
   const limits = await loadLimits();
-  // Accounts on the ignore list get no dashboard. An email only leaves the
-  // Prometheus labels when retention expires, so without this a deactivated
-  // account would keep showing up with every panel empty.
+  // Accounts on the ignore list get no dashboard. An email only leaves Loki
+  // when the 7d window used to discover accounts ages out of retention, so
+  // without this a deactivated account would keep showing up with every panel
+  // empty.
   const ignore = new Set(limits.ignore ?? []);
-  const allEmails = await promLabelValues('user_email');
+  const allEmails = await discoverAccounts();
   const emails = allEmails.filter((email) => {
     if (!ignore.has(email)) return true;
     console.log(`ignored: ${email} ('ignore' list in account-limits.json)`);

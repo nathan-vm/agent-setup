@@ -4,10 +4,10 @@ Local stack for tracking **coding-assistant CLI sessions** — how much of your
 limit each session burns and how it is used. Today it ingests Claude Code; other
 tools plug in later through their own adapters.
 
-Path: Claude Code → OTel Collector → Prometheus (metrics) + Loki (logs) →
-Grafana. In parallel, the **transcript-exporter** reads the local transcripts and
-publishes into Loki two things the OTel telemetry does not give you: the real MCP
-and skill names, and consumption measured over the real limit windows.
+Path: Claude Code → OTel Collector → Loki (logs) → Grafana. In parallel, the
+**transcript-exporter** reads the local transcripts and publishes into Loki two
+things the OTel telemetry does not give you: the real MCP and skill names, and
+consumption measured over the real limit windows.
 
 ## Services
 
@@ -15,7 +15,6 @@ and skill names, and consumption measured over the real limit windows.
 |---------------------|----------------------------------------------------|------|
 | OTel Collector      | `localhost:47317` (gRPC), `localhost:47318` (HTTP) | single OTLP ingest endpoint |
 | Grafana             | http://localhost:47300                             | dashboards (anonymous Viewer, `admin`/`admin` to edit) |
-| Prometheus          | http://localhost:47909                             | metrics, 90d retention |
 | Loki                | http://localhost:47100                             | logs and events, 90d retention |
 | transcript-exporter | —                                                  | real tool names + usage meter |
 | dashboard-generator | —                                                  | one dashboard per account |
@@ -55,8 +54,7 @@ services:
 
 The wizard generates that file when you pick more than one directory, and also
 puts the accounts you did NOT pick on the `ignore` list in `account-limits.json`
-— otherwise they would get an empty dashboard as soon as they showed up in
-Prometheus.
+— otherwise they would get an empty dashboard as soon as they showed up in Loki.
 
 Neither `.env` nor `docker-compose.override.yml` is versioned: they point at
 paths on this machine. The templates are `.env.example` and this README.
@@ -160,10 +158,11 @@ carrying `cost_usd`, the four token types, `model`, `effort`, `speed`,
 `duration_ms`, `query_source`, `skill_name`, `session_id`, `prompt_id` and
 `request_id`. Every panel reads from it.
 
-It is exact per request, unlike the Prometheus metrics, which are per-session
-counters that go stale ~5min after a session ends. Prometheus stays in the stack
-(cheap ingest, long retention, and it is where the account list comes from) but it
-is out of the panels.
+It is exact per request, unlike the OTel metrics Claude Code also emits, which are
+per-session counters that go stale ~5min after a session ends. The Collector still
+accepts them (nothing breaks if a client sends them) but nothing stores or reads
+them — every panel, and the account list itself, reads Loki (see `discoverAccounts`
+in `grafana/generate-account-dashboards.mjs`).
 
 ### transcript-exporter — what OTel redacts
 
@@ -193,9 +192,9 @@ proportionally to each result's size.
 
 `cache_read` is left out **on purpose**: what matters is the marginal cost of that
 call, not its drag on later turns. That is why the exporter's number is much
-smaller than Prometheus's `claude_code_token_usage_tokens_total` for the same
-server — they measure different things, and only the exporter's answers "what did
-this tool cost me".
+smaller than the raw token counters Claude Code emits for the same server — those
+count `cache_read` too, so they measure a different thing, and only the exporter's
+number answers "what did this tool cost me".
 
 Subagent tracks (`isSidechain`) are tracked separately from the main thread,
 otherwise a subagent's first message would settle the attribution of a tool called
@@ -605,13 +604,15 @@ The intervals are tuned for the data to be useful, not instantaneous:
 | `transcript-exporter` | 120s | each pass scans hundreds of transcripts and publishes the rate curve |
 | `dashboard-generator` | 600s | spawns a Node process and queries 7–30 days |
 | Grafana re-provision | 300s | re-parses every dashboard on disk |
-| Prometheus scrape | 60s | only used to list accounts; the panels read Loki |
 | Loki compactor | 600s | the image's default |
 | Dashboard auto-refresh | 300s | each refresh fires ~14 Loki queries |
 
 That is **~82% fewer wakeups per hour** than the initial configuration (1740 →
-306). Grafana also has unified alerting (which keeps a scheduler running even with
-zero rules), version checks and analytics turned off.
+306), and one fewer periodic task since: Prometheus (and its 60s scrape) was
+dropped entirely — it only ever existed to list accounts, which is now a Loki
+query (`discoverAccounts` in `grafana/generate-account-dashboards.mjs`). Grafana
+also has unified alerting (which keeps a scheduler running even with zero rules),
+version checks and analytics turned off.
 
 At rest the stack sits around **700 MiB** with CPU near zero. If you need fresher
 data occasionally, raise the refresh in the Grafana tab rather than lowering these
@@ -619,14 +620,17 @@ intervals again.
 
 ## Notes
 
-- Host ports: 47300 (Grafana), 47317/47318 (OTLP), 47909 (Prometheus), 47100
-  (Loki). All published on `127.0.0.1`, not `0.0.0.0` — Grafana runs anonymous and
-  the Loki API has no authentication, so binding them to every interface would
-  expose both to anyone on the same network.
-- Metric names carry the Prometheus exporter's unit and type suffixes, e.g.
-  `claude_code_cost_usage_USD_total`.
-- Resource attributes (`user.email`, `organization.id`, `service.name`) become
-  Prometheus labels (`user_email`, …) through `resource_to_telemetry_conversion`.
+- Host ports: 47300 (Grafana), 47317/47318 (OTLP), 47100 (Loki). All published
+  on `127.0.0.1`, not `0.0.0.0` — Grafana runs anonymous and the Loki API has no
+  authentication, so binding them to every interface would expose both to anyone
+  on the same network.
+- There is no Prometheus in this stack. It used to exist only to list which
+  accounts had sent telemetry (via `label_values(user_email)`, cheap because
+  `resource_to_telemetry_conversion` turned Claude Code's resource attributes
+  into real Prometheus labels); that list now comes from a Loki query instead
+  (`discoverAccounts` in `grafana/generate-account-dashboards.mjs`), following the
+  same pattern `rate-meter.mjs` already used to find every account with
+  telemetry. No panel ever read from Prometheus.
 - `loki-config.yaml` deviates from the image's default in four places, all
   commented in the file: it accepts old samples (backfill), removes the query
   window cap, enables 90d retention, and raises `ingester.max_chunk_age` — without
