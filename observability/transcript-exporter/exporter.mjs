@@ -117,6 +117,15 @@ const emptyState = () => ({
   // later pass labelled those requests "third-party" — and dedup by request_id
   // then locks the wrong name in forever.
   pluginSkills: {},
+  // request_id -> { skill, ts }. Finer-grained twin of pluginSkills: a session
+  // that used TWO OR MORE plugin skills can't be resolved from the per-session
+  // set alone (no way to tell which request belongs to which), so every one of
+  // its "third-party" requests stayed unresolved. This records the skill that
+  // was actually active at the moment of each specific request — the same
+  // activeSkill value already tracked per-track, just also keyed by the one id
+  // that joins to the OTel side. `ts` is only for pruning entries older than
+  // DEDUP_DAYS, the same cutoff rebuildSkillRecords ever looks back to.
+  pluginSkillByRequest: {},
 });
 
 async function loadState() {
@@ -404,7 +413,7 @@ function settle(group, inputTokens) {
 // Reads a transcript from the stored offset and returns the finished records.
 // `pending` carries, across runs, the groups still waiting for the next assistant
 // message — without it a tool_use landing on a poll boundary would be orphaned.
-async function processTranscript(path, fileState, pluginSkills) {
+async function processTranscript(path, fileState, pluginSkills, pluginSkillByRequest) {
   const records = [];
   // Pending groups are kept per track: the main thread must not be settled by a
   // subagent's first message, which is a different conversation.
@@ -465,6 +474,14 @@ async function processTranscript(path, fileState, pluginSkills) {
       // here is the real name, which is exactly what OTel redacts.
       if (entry.sessionId && activeSkill[track]?.includes(':')) {
         (pluginSkills[entry.sessionId] ??= new Set()).add(activeSkill[track]);
+        // The precise twin of the line above: WHICH request this skill was
+        // active for, not just that the session used it at some point.
+        if (entry.requestId) {
+          pluginSkillByRequest[entry.requestId] = {
+            skill: activeSkill[track],
+            ts: Date.parse(entry.timestamp) || Date.now(),
+          };
+        }
       }
       if (usage && pending[track]) {
         const inputTokens = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
@@ -645,7 +662,7 @@ async function projectOwners(lokiUrl, batch = []) {
 // name with "third-party", and the transcript knows what it was. That is what
 // makes the skills panel reconcile exactly with the weekly breakdown table, which
 // reads the same source.
-async function rebuildSkillRecords(state, pluginSkills, fullHistory) {
+async function rebuildSkillRecords(state, pluginSkills, pluginSkillByRequest, fullHistory) {
   const out = [];
   // Scans OTel directly rather than the session list from the transcripts: not
   // every session has a transcript on this machine (another config dir, a rotated
@@ -686,10 +703,14 @@ async function rebuildSkillRecords(state, pluginSkills, fullHistory) {
     for (const stream of streams) {
       const meta = stream.stream ?? {};
       const sessionId = meta.session_id || '';
-      // "third-party" can only be undone when the session used exactly one plugin
-      // skill — with two, there is no way to tell which is which.
+      // Precise first: which skill was active AT THIS SPECIFIC request.
+      // Falls back to the session-wide set only for requests that predate this
+      // per-request tracking — there "third-party" can still only be undone
+      // when the session used exactly one plugin skill, since with two there
+      // is no way to tell which is which.
       const candidatos = pluginSkills[sessionId];
-      const real = candidatos?.size === 1 ? [...candidatos][0] : null;
+      const real = pluginSkillByRequest[meta.request_id]?.skill
+        ?? (candidatos?.size === 1 ? [...candidatos][0] : null);
       const skill = meta.skill_name === 'third-party' && real ? real : (meta.skill_name || '');
       if (!skill || !meta.request_id) continue;
       // "owner" as a field of its own, rather than letting the dashboard filter by
@@ -842,11 +863,20 @@ async function runPass(state) {
   for (const [sessionId, nomes] of Object.entries(state.pluginSkills ?? {})) {
     pluginSkills[sessionId] = new Set(nomes);
   }
+  // request_id -> { skill, ts }. Same idea, finer grain — see emptyState().
+  // Pruned to the same DEDUP_DAYS window rebuildSkillRecords ever looks back
+  // to, otherwise this grows forever with entries nothing will ever read again.
+  const pluginSkillByRequest = {};
+  const pluginSkillCutoff = Date.now() - DEDUP_DAYS * 24 * 3600 * 1000;
+  for (const [requestId, info] of Object.entries(state.pluginSkillByRequest ?? {})) {
+    if (info?.ts >= pluginSkillCutoff) pluginSkillByRequest[requestId] = info;
+  }
 
   for (const path of files) {
     const fileState = state.files[path] ?? { offset: 0, pending: null, activeSkill: null };
     try {
-      const { records, offset, pending, activeSkill } = await processTranscript(path, fileState, pluginSkills);
+      const { records, offset, pending, activeSkill } =
+        await processTranscript(path, fileState, pluginSkills, pluginSkillByRequest);
 
       // A pending group this old means a session that ended with no assistant
       // reply. It goes out with zero attribution so it does not vanish from the
@@ -867,7 +897,7 @@ async function runPass(state) {
     }
   }
 
-  collected.push(...await rebuildSkillRecords(state, pluginSkills, primeiraPassada));
+  collected.push(...await rebuildSkillRecords(state, pluginSkills, pluginSkillByRequest, primeiraPassada));
 
   const { fresh, novos: novosVistos } = dropAlreadySeen(state, collected);
   const skipped = collected.length - fresh.length;
@@ -878,6 +908,7 @@ async function runPass(state) {
     for (const [sessionId, nomes] of Object.entries(pluginSkills)) {
       state.pluginSkills[sessionId] = [...nomes];
     }
+    state.pluginSkillByRequest = pluginSkillByRequest;
   };
   if (!fresh.length) {
     // Nothing new to write, but the file offsets did move forward.
