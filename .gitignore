@@ -14,3 +14,7 @@ observability/grafana/account-limits.json
 observability/.env
 observability/.env.bak*
 observability/docker-compose.override.yml
+
+# Git worktrees (local dev convenience, not part of the repo).
+.worktrees/
+.claude/worktrees/
