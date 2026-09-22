@@ -728,12 +728,25 @@ async function rebuildSkillRecords(state, pluginSkills, fullHistory) {
   return out;
 }
 
+// Returns { pushed, skipped }: records Loki actually accepted, and records it
+// rejected as "too far behind" its per-stream chunk boundary (a live stream's
+// chunks close over time, and once closed Loki can no longer take a write
+// landing inside that already-flushed window — distinct from
+// reject_old_samples, which only guards against age relative to wall clock
+// and is already off). That rejection is NOT retryable by waiting, so it
+// must not abort the whole batch: a `--rescan` on a stream that already has
+// live, recent data would otherwise lose every later (in-range) batch too,
+// because they never get attempted. The caller must only mark `pushed`
+// records as seen — a `skipped` one has to stay eligible for a future
+// attempt (e.g. once Loki's own retention ages the blocking chunk out).
 async function pushToLoki(records) {
-  if (!records.length || DRY_RUN) return;
+  if (!records.length || DRY_RUN) return { pushed: [], skipped: [] };
   // Ordena por timestamp antes de empurrar. O Loki rejeita escrita muito fora de
   // ordem dentro de um stream, e o backfill inicial varre vários arquivos que se
   // intercalam no tempo.
   const ordered = [...records].sort((a, b) => Number(BigInt(a.timestampNs) - BigInt(b.timestampNs)));
+  const pushed = [];
+  const skipped = [];
   for (let i = 0; i < ordered.length; i += BATCH_SIZE) {
     const chunk = ordered.slice(i, i + BATCH_SIZE);
     // Records go to different streams (tools and skills), so group by stream
@@ -750,6 +763,7 @@ async function pushToLoki(records) {
     // answers "empty ring". Its image has no shell utilities for a compose
     // healthcheck, so the waiting happens here.
     let lastError;
+    let tooOld = false;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       if (attempt) await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
       const response = await fetch(new URL('/loki/api/v1/push', LOKI_URL), {
@@ -758,12 +772,21 @@ async function pushToLoki(records) {
         body: JSON.stringify(payload),
       }).catch((error) => ({ ok: false, status: 0, text: async () => error.message }));
       if (response.ok) { lastError = null; break; }
-      lastError = `push falhou ${response.status}: ${(await response.text()).slice(0, 200)}`;
+      const body = await response.text();
+      lastError = `push falhou ${response.status}: ${body.slice(0, 200)}`;
+      if (response.status === 400 && /too far behind/i.test(body)) { tooOld = true; break; }
       // 4xx means an invalid payload: retrying will not help.
       if (response.status >= 400 && response.status < 500) break;
     }
+    if (tooOld) {
+      log(`${chunk.length} record(s) rejected as too old by Loki, skipped: ${lastError}`);
+      skipped.push(...chunk);
+      continue;
+    }
     if (lastError) throw new Error(lastError);
+    pushed.push(...chunk);
   }
+  return { pushed, skipped };
 }
 
 // ------------------------------------------------------------------ loop
@@ -874,11 +897,16 @@ async function runPass(state) {
   }
 
   if (DRY_RUN) summarize(collected);
-  await pushToLoki(collected);
-  // Só agora: o push deu certo.
+  const { pushed, skipped: rejected } = await pushToLoki(collected);
+  // A record Loki rejected as too old must not be marked seen — leaving its
+  // dedup entry out keeps it eligible for a later attempt, instead of being
+  // silently and permanently dropped.
+  for (const record of rejected) {
+    novosVistos.delete(record.dedupKey || record.meta.tool_use_id);
+  }
   confirmar();
   await saveState(state);
-  return collected.length;
+  return pushed.length;
 }
 
 // Under --dry-run, shows what would be written: this is how token attribution
