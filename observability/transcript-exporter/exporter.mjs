@@ -775,8 +775,19 @@ async function pushToLoki(records) {
       const body = await response.text();
       lastError = `push falhou ${response.status}: ${body.slice(0, 200)}`;
       if (response.status === 400 && /too far behind/i.test(body)) { tooOld = true; break; }
-      // 4xx means an invalid payload: retrying will not help.
-      if (response.status >= 400 && response.status < 500) break;
+      // 429 is the exception among 4xx: it means "too fast", not "invalid" —
+      // confirmed live during a full reimport (a fresh stream backfilling 90
+      // days pushes many ~700KB batches back to back and outruns Loki's
+      // per-user ingestion rate limit). It goes through the same backoff as a
+      // 5xx instead of aborting the pass immediately.
+      if (response.status !== 429 && response.status >= 400 && response.status < 500) break;
+    }
+    // Paced even after a clean push: bursting one BATCH_SIZE payload right
+    // after another is exactly what tripped the 429 above during a full
+    // reimport. A fixed small gap keeps sustained throughput under the
+    // per-user rate limit without needing to know its exact value.
+    if (!lastError && i + BATCH_SIZE < ordered.length) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
     if (tooOld) {
       log(`${chunk.length} record(s) rejected as too old by Loki, skipped: ${lastError}`);
